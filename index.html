@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101711"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，体验模拟锁定与导弹发射。">
+  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=3">
+</head>
+<body>
+<main id="app" class="briefing">
+  <video id="camera" autoplay muted playsinline aria-label="后置摄像头画面"></video>
+  <div class="terrain" aria-hidden="true"><div class="grid"></div><div class="horizon"></div></div>
+  <div class="scanlines" aria-hidden="true"></div>
+  <header><a class="brand" href="./" aria-label="返回任务简报"><span class="emblem">Ⅲ</span><span>LONGCASTER<small>TACTICAL BURGER DIVISION</small></span></a><div class="header-right"><span class="test-badge">测试模式</span><span class="version">PROTOTYPE / 02</span><button id="sound" class="icon-button" aria-pressed="false" aria-label="开启音效">音效 OFF</button></div></header>
+  <section id="brief" aria-labelledby="title">
+    <div class="brief-copy"><p class="eyebrow"><span class="status-dot"></span> OPERATION 01 / LUNCH BREAK</p><h1 id="title">BURGER<br><span>STRIKE.</span></h1><p class="intro">目标已上桌。<br>找到攻击角度，摧毁肉饼核心。</p><div class="brief-meta"><span><small>CALLSIGN</small>TRIGGER</span><span><small>TARGET</small>BURGER CORE</span><span><small>LOADOUT</small>08 MSL</span></div><button id="start" class="primary">开始任务 <span>↗</span></button><button id="demo" class="text-button">先体验演示，不开启摄像头 →</button><p class="privacy">摄像头画面仅在设备上显示，不录制、不上传。<br>本版尚未识别实物，核心状态由测试开关控制。</p><p id="camera-error" role="status"></p></div>
+    <div class="brief-art" aria-hidden="true"><div class="art-ring"></div><span class="art-coordinate top">TARGET PROFILE / B-04</span><svg viewBox="0 0 600 450" class="burger-art"><defs><linearGradient id="bun" x2="0" y2="1"><stop stop-color="#d5ab64"/><stop offset="1" stop-color="#7e5430"/></linearGradient><linearGradient id="meat" x2="0" y2="1"><stop stop-color="#593c2b"/><stop offset="1" stop-color="#2e211b"/></linearGradient></defs><ellipse cx="300" cy="375" rx="195" ry="24" fill="#000" opacity=".35"/><path d="M128 315Q300 364 472 315L463 343Q300 405 137 343Z" fill="url(#bun)" stroke="#c19859"/><path d="M122 299L148 284 173 299 202 280 232 299 265 284 300 302 337 282 371 299 401 283 431 299 470 285 482 307 453 327 424 312 393 331 360 315 325 332 293 316 255 333 221 312 188 328 158 312 134 322Z" fill="#657c37" stroke="#a5b86d"/><path d="M126 260Q300 291 474 260L473 290Q300 340 127 288Z" fill="url(#meat)" stroke="#9b7751" stroke-width="2"/><path d="M129 245L236 243 291 253 363 239 471 248 420 282 373 267 304 292 247 267 187 281Z" fill="#c8ab57" stroke="#e8cc7c"/><path d="M124 238C131 69 468 69 477 238Q302 308 124 238Z" fill="url(#bun)" stroke="#e3ba78" stroke-width="2"/><g fill="#eddfaf"><ellipse cx="220" cy="165" rx="9" ry="3" transform="rotate(-30 220 165)"/><ellipse cx="283" cy="143" rx="9" ry="3" transform="rotate(25 283 143)"/><ellipse cx="355" cy="164" rx="9" ry="3"/><ellipse cx="397" cy="206" rx="9" ry="3" transform="rotate(-25 397 206)"/><ellipse cx="306" cy="204" rx="9" ry="3" transform="rotate(-20 306 204)"/><ellipse cx="203" cy="211" rx="9" ry="3"/></g><g fill="none" stroke="#c5fa7a" stroke-width="1" opacity=".65"><ellipse cx="300" cy="266" rx="210" ry="62" stroke-dasharray="4 8"/><path d="M70 266H158M443 266H538M300 53V99M300 348V400"/></g></svg><span class="art-tag">01 — CORE<small>APPROACH FROM THE SIDE</small></span><span class="art-coordinate bottom">SIMULATED TARGET · 非实物识别</span></div>
+    <footer class="brief-footer"><span>FAN-MADE INTERACTIVE EXPERIMENT</span><span>相机 · 瞄准 · 发射 <b>↗</b></span></footer>
+  </section>
+  <section id="mission" hidden aria-label="模拟攻击任务">
+    <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET BURGER <span>+400</span></div></div>
+    <div class="radio"><span>AWACS Longcaster</span><p><b>≪</b> <span id="radio-text">目标已确认。准备好就开火。</span> <b>≫</b></p></div>
+    <span class="prototype-label">SIMULATION / 02</span>
+    <svg class="flight-hud" viewBox="0 0 320 300" aria-label="手机姿态刻度">
+      <defs><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
+      <path class="rails" d="M38 270V30h9 M282 270V30h-9 M38 150h8 M282 150h-8"/>
+      <g clip-path="url(#ladder-clip)"><g transform="translate(160 150)"><g id="attitude-roll"><g id="attitude-pitch"></g></g></g></g>
+      <path class="boresight" d="M146 150h6l4 6 4-6 4 6 4-6h6"/>
+    </svg>
+    <div id="demo-target" aria-hidden="true"><svg viewBox="0 0 240 170"><ellipse cx="120" cy="150" rx="92" ry="12" fill="#000" opacity=".4"/><path d="M34 119Q120 146 206 119L200 140Q120 165 40 140Z" fill="#bd8844"/><path d="M31 116L47 106 62 115 80 106 100 116 120 105 140 117 161 104 179 115 196 106 209 119 193 130 175 122 157 132 138 122 117 133 96 122 77 131 56 122 40 128Z" fill="#73954b"/><path d="M32 96Q120 121 208 96L204 115Q120 139 36 115Z" fill="#593626" stroke="#c28a4f"/><path d="M34 91L203 91 180 113 153 102 118 119 88 101 63 111Z" fill="#edba49"/><path d="M31 88C33 2 207 2 209 88Q120 119 31 88" fill="#c99552" stroke="#edbf76"/><g fill="#f0d6a0"><ellipse cx="80" cy="51" rx="5" ry="2"/><ellipse cx="111" cy="34" rx="5" ry="2"/><ellipse cx="153" cy="48" rx="5" ry="2"/><ellipse cx="129" cy="68" rx="5" ry="2"/></g></svg></div>
+    <div id="target" class="target" aria-label="模拟肉饼核心">
+      <svg viewBox="0 0 100 88" aria-hidden="true"><polygon class="target-shell" points="26,3 74,3 98,44 74,85 26,85 2,44"/><path d="M50 12 82 44 50 76 18 44Z"/></svg>
+      <span class="target-title">CORE</span>
+    </div>
+    <canvas id="effects" aria-hidden="true"></canvas>
+    <div id="feedback" role="status" aria-live="polite"><strong></strong><span></span></div>
+    <div class="loadout" aria-label="F-22 武器状态"><div>GUN <span>--</span></div><div class="selected-weapon">&gt;MSL <span id="ammo">08</span></div><div>8AAM <span>0</span></div><div>FLR <span>--</span></div><div>DMG <span>0%</span></div>
+      <svg class="aircraft" viewBox="0 0 130 110" aria-label="F-22 俯视轮廓">
+        <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
+          <path d="M65 5 61 22 59 38 54 45 51 37 47 39 49 52 32 70 32 79 54 72 55 83 44 94 44 101 60 95 61 103 69 103 70 95 86 101 86 94 75 83 76 72 98 79 98 70 81 52 83 39 79 37 76 45 71 38 69 22Z"/>
+          <path d="M65 17 62 31 65 38 68 31Z M59 41 59 70 55 83 M71 41 71 70 75 83 M60 78v17 M70 78v17 M65 40v43 M49 52 60 64 M81 52 70 64 M59 86h12 M61 103v4h3v-4 M66 103v4h3v-4"/>
+          <path d="M13 36 10 45v40l-3 6v10h6l3-4V45Z M117 36 114 45v52l3 4h6V91l-3-6V45Z"/>
+        </g>
+      </svg><small>F-22A</small>
+    </div>
+    <div class="mission-actions"><details id="settings"><summary>测试设置</summary><div class="settings-panel">
+      <p class="panel-label">模拟核心 <span>尚未接入实物识别</span></p>
+      <div class="segmented" role="group" aria-label="模拟核心状态"><button id="exposed" aria-pressed="true">核心露出</button><button id="blocked" aria-pressed="false">被面包遮挡</button></div>
+      <div class="setting-row"><span id="orientation-status" role="status">姿态：静态 HUD</span><button id="orientation-toggle" class="quiet-button" aria-pressed="false">开启姿态感应</button></div>
+      <div class="setting-row"><span id="camera-status">● 演示背景</span><button id="camera-toggle" class="quiet-button">开启摄像头</button></div>
+      <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">合成音效 OFF</button></div>
+      <p class="settings-note">姿态只改变刻度，不决定命中。通信台词为临时文案；原作语音与音效待接入。</p>
+    </div></details><button id="reset" class="quiet-button">↻ 重置任务</button></div>
+    <button id="fire" class="fire-button"><span>FIRE</span><small>发射导弹</small></button>
+    <p class="orientation-note">横屏体验更接近座舱视野</p>
+  </section>
+</main><script type="module" src="./app.js?v=3"></script>
+</body></html>
