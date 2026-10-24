@@ -1,9 +1,9 @@
 import {attitude, smoothAngle} from './attitude.mjs';
 
 export function setupOrientation({button, status, rollGroup, pitchGroup, reduced}) {
-  // 3 SVG units per degree. Horizontal bars represent angles relative to gravity.
-  for (let angle = -90; angle <= 90; angle += 10) {
-    const y = -angle * 3;
+  // Display scale is independent of the sensor calculation.
+  for (let angle = -90; angle <= 90; angle += 5) {
+    const y = -angle * 12;
     const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     const dash = angle < 0 ? 'stroke-dasharray="3 3"' : '';
     const width = angle === 0 ? 79 : 48;
@@ -16,7 +16,7 @@ export function setupOrientation({button, status, rollGroup, pitchGroup, reduced
   const screenAngle = () => screen.orientation?.angle ?? window.orientation ?? 0;
   function draw(value) {
     rollGroup.setAttribute('transform', `rotate(${value.roll})`);
-    pitchGroup.setAttribute('transform', `translate(0 ${value.pitch * 3})`);
+    pitchGroup.setAttribute('transform', `translate(0 ${value.pitch * 12})`);
   }
   function animate(time) {
     if (!listening || !target) return;
