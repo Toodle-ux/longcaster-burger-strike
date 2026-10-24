@@ -3,11 +3,13 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#071626"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，体验模拟锁定与导弹发射。">
-  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=4">
+  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=5">
 </head>
 <body>
 <main id="app" class="briefing">
   <video id="camera" autoplay muted playsinline aria-label="后置摄像头画面"></video>
+  <video id="local-video" muted playsinline preload="metadata" aria-label="本地测试视频"></video>
+  <input id="video-file" type="file" accept="video/*" hidden>
   <div class="terrain" aria-hidden="true"><div class="grid"></div><div class="horizon"></div></div>
   <div class="scanlines" aria-hidden="true"></div>
   <section id="title-screen" class="title-screen" aria-labelledby="title">
@@ -36,8 +38,8 @@
         </svg><div class="map-legend"><span class="enemy">◇ CORE</span><span>△ ALLIES</span><span class="ally">△ TRIGGER</span></div>
       </div>
       <div class="brief-copy"><p class="brief-kicker">MISSION OBJECTIVE</p><h3>找到角度，击破核心。</h3><p class="brief-description">面包遮挡时无法命中。<br>从侧面接近，让肉饼核心露出。</p><div class="brief-meta"><span>TARGET <b>CORE +400</b></span><span>AIRCRAFT <b>Su-57</b></span><span>WEAPON <b>MSL × 08</b></span></div>
-        <button id="start" class="blue-button">开始任务 <span>›</span></button><button id="demo" class="text-button">不启用摄像头，进入演示 →</button>
-        <p class="privacy">当前为玩法原型：识别与遮挡由测试设置模拟。<br>摄像头画面不录制、不上传。音效为临时合成。</p><p id="camera-error" role="status"></p>
+        <button id="start" class="blue-button">开始任务 <span>›</span></button><button id="choose-video" class="text-button">选择视频开始 →</button><button id="demo" class="text-button">不启用摄像头，进入演示 →</button>
+        <p class="privacy">当前为玩法原型：识别与遮挡由测试设置模拟。<br>摄像头和所选视频仅在本机使用，不上传。视频静音播放。</p><p id="camera-error" role="status"></p>
       </div>
     </div>
   </section>
@@ -73,11 +75,13 @@
       <div class="setting-row"><span>模拟目标跟踪</span><button id="tracking-toggle" class="quiet-button" aria-pressed="true">目标可见</button></div>
       <div class="setting-row"><span id="orientation-status" role="status">姿态：静态 HUD</span><button id="orientation-toggle" class="quiet-button" aria-pressed="false">开启姿态感应</button></div>
       <div class="setting-row"><span id="camera-status">● 演示背景</span><button id="camera-toggle" class="quiet-button">开启摄像头</button></div>
+      <div class="setting-row"><button id="change-video" class="quiet-button">选择／更换视频</button><button id="close-video" class="quiet-button" hidden>关闭视频</button></div>
       <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">合成音效 OFF</button></div>
       <p class="settings-note">姿态只改变刻度，不决定命中。每枚导弹冷却 3 秒。目标丢失时暂停发射；PLSL 暂未开放。通信台词为临时文案。</p>
     </div></details><button id="reset" class="quiet-button">↻ 重置任务</button></div>
+    <div id="video-controls" hidden aria-label="本地视频播放控制"><span id="video-time">00:00 / 00:00</span><button id="video-play" class="quiet-button">暂停</button><button id="video-replay" class="quiet-button">重播</button></div>
     <button id="fire" class="fire-button"><span>FIRE</span><small>发射导弹</small></button>
     <p class="orientation-note">横屏体验更接近座舱视野</p>
   </section>
-</main><script type="module" src="./app.js?v=4"></script>
+</main><script type="module" src="./app.js?v=5"></script>
 </body></html>

@@ -1,5 +1,6 @@
 import {setupOrientation} from './orientation.mjs?v=4';
 import {Mission} from './engine.mjs?v=4';
+import {setupLocalVideo} from './local-video.mjs?v=5';
 import {createEffects} from './effects.mjs?v=4';
 const $ = id => document.getElementById(id);
 const game = new Mission();
@@ -71,9 +72,26 @@ function enter() {
   render(); acquire();
 }
 function cameraMessage(message){$('camera-error').textContent=message;if(active)$('radio-text').textContent=message;}
-function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';}
+function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';}
 function stopCamera(){cameraGeneration++;cameraPending=false;const old=stream;stream=null;if(old)old.getTracks().forEach(t=>t.stop());$('camera').srcObject=null;updateCamera();}
-async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();$('radio-text').textContent='将汉堡放在中央目标框内。当前由测试开关模拟核心状态。';}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
+async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}localVideo.clear();stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();$('radio-text').textContent='将汉堡放在中央目标框内。当前由测试开关模拟核心状态。';}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
+
+
+const localVideo=setupLocalVideo({
+  video:$('local-video'), input:$('video-file'), controls:$('video-controls'),
+  playButton:$('video-play'), replayButton:$('video-replay'), closeButton:$('close-video'), time:$('video-time'),
+  beforeSelect:() => {stopCamera(); reset();},
+  onSource:present => {
+    $('app').classList.toggle('video-live',present);
+    updateCamera();
+    if (present) {
+      enter(); $('settings').open=false;
+      cameraMessage('本地视频模式。核心位置与遮挡仍由测试设置模拟。');
+    }
+  },
+  onMessage:cameraMessage,
+});
+for (const id of ['choose-video','change-video']) $(id).addEventListener('click', () => localVideo.choose());
 
 function fire() {
   if (!active) return;
@@ -160,5 +178,5 @@ const stopOrientation=setupOrientation({button:$('orientation-toggle'),status:$(
 // Only two cooldown indicators need updating, even when no camera is available.
 setInterval(() => {if(active && !document.hidden) renderCooldown();},50);
 window.addEventListener('pagehide', () => {
-  stopOrientation(); stopCamera(); reset();
+  stopOrientation(); stopCamera(); localVideo.clear(); reset();
 });
