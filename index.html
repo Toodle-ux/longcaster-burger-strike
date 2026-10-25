@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#071626"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，测试桌面汉堡识别、姿态 HUD 与导弹发射。">
-  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=7">
+  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=8">
 </head>
 <body>
 <main id="app" class="briefing">
@@ -46,7 +46,7 @@
   <section id="mission" hidden aria-label="模拟攻击任务">
     <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET BURGER <span>+400</span></div></div>
     <div class="radio"><span>AWACS Longcaster</span><p><b>≪</b> <span id="radio-text">目标已确认。准备好就开火。</span> <b>≫</b></p></div>
-    <span class="prototype-label">TABLETOP TEST / 07</span>
+    <span class="prototype-label">TABLETOP TEST / 08</span>
     <svg class="flight-hud" viewBox="0 0 320 300" aria-label="手机姿态刻度">
       <defs><filter id="hud-green" x="-10%" y="-10%" width="120%" height="120%"><feFlood flood-color="#9df5a4"/><feComposite in2="SourceAlpha" operator="in"/></filter><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
       <image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240"/><image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240" transform="translate(320 0) scale(-1 1)"/>
@@ -58,7 +58,6 @@
       <span class="target-shell"></span><span class="lock-diamond"></span>
       <span class="target-title">CORE</span>
     </div>
-    <div id="seek-diamond" aria-hidden="true"></div>
     <canvas id="effects" aria-hidden="true"></canvas>
     <div id="feedback" role="status" aria-live="polite"><strong></strong><span></span></div>
     <div class="loadout" aria-label="Su-57 武器状态"><div class="selected-weapon">&gt;MSL <span id="ammo">08</span></div><div>PLSL <span>--</span></div><div>DMG <span>0%</span></div>
@@ -77,6 +76,7 @@
       <div class="setting-row"><span id="camera-status">● 演示背景</span><button id="camera-toggle" class="quiet-button">开启摄像头</button></div>
       <div class="setting-row"><button id="change-video" class="quiet-button">选择／更换视频</button><button id="close-video" class="quiet-button" hidden>关闭视频</button></div>
       <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">原作音频 OFF</button></div>
+      <details class="diagnostics"><summary>识别运行诊断</summary><pre id="ar-diagnostics">等待运行数据</pre><button id="export-diagnostics" class="quiet-button">导出诊断</button><p>只保存最近的时间与状态记录，不含图像或视频。帧通知包含浏览器调度耗时，不等于摄像头硬件掉帧。</p></details>
       <p class="settings-note">手机摄像头可启用姿态感应；跳过、拒绝或数据中断时为静态 HUD。录像使用静态 HUD。实验识别只针对桌上单个第四款汉堡，未验证手指或配件遮挡。中心半径 2 mm 的区域，模型估计露出至少 15% 才可命中；不确定或暂停时不能攻击。两枚导弹各冷却 3 秒；PLSL 暂未开放。</p>
     </div></details><button id="reset" class="quiet-button">↻ 重置任务</button></div>
     <div id="video-controls" hidden aria-label="本地视频播放控制"><span id="video-time">00:00 / 00:00</span><button id="video-play" class="quiet-button">暂停</button><button id="video-replay" class="quiet-button">重播</button></div>
@@ -87,5 +87,5 @@
 <section id="orientation-prompt" class="permission-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="orientation-title">
     <div class="permission-card"><small>FLIGHT HUD / ATTITUDE</small><h2 id="orientation-title">让 HUD 跟着手机倾斜</h2><p>摄像头已开启。开启姿态感应后，刻度会随手机左右倾斜、抬起和放低而变化。</p><button id="orientation-allow" class="blue-button">开启姿态感应</button><button id="orientation-skip" class="text-button">暂时跳过，使用静态 HUD</button></div>
   </section>
-</main><script type="module" src="./app.js?v=7"></script>
+</main><script type="module" src="./app.js?v=8"></script>
 </body></html>

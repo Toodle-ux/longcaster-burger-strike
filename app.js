@@ -1,4 +1,4 @@
-import {setupRecognition,sourcePoint} from './recognition.mjs?v=7';
+import {setupRecognition,sourcePoint} from './recognition.mjs?v=8';
 import {createAudio} from './audio.mjs?v=7';
 import {setupOrientation} from './orientation.mjs?v=7';
 import {Mission} from './engine.mjs?v=4';
@@ -11,37 +11,39 @@ const effects = createEffects($('effects'), $('target'), reduced);
 const shotTimers = new Set();
 let active = false, stream = null, cameraPending = false, cameraGeneration = 0;
 let orientationController,recognitionController;
-let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo';
+let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo',lockAnnounced=false,lastDiagnosticsPaint=-Infinity;
 const audio=createAudio();
 function getSource(){return stream?{type:'camera',video:$('camera')}:localVideo.hasSource()?{type:'video',video:$('local-video')}:{type:'demo',video:null};}
 function applyRecognition(observation) {
-  const {type,video,result,state,failed}=observation;
+  const {type,video,result,state,failed,displayPose,displayOpacity,displayStatus}=observation;
+  renderDiagnostics(observation.diagnostics);
   if(type!==lastRecognitionType){lastRecognitionType=type;reset();}
   const simulated=type==='demo';
   $('simulation-controls').hidden=!simulated;
   $('target').classList.toggle('uncertain',!simulated&&state==='unknown');
   if(simulated) {
     targetVisible=true;
-    for(const id of ['target','seek-diamond']){$(id).style.left='';$(id).style.top='';}
+    $('target').style.left='';$('target').style.top='';$('target').style.setProperty('--tracking-opacity','1');
     $('recognition-status').textContent='演示模式 · 手动切换核心状态';
     $('tracking-hint').textContent='演示模式 · 可在测试设置切换遮挡';
     render();return;
   }
-  const wasTracked=game.tracked;
-  const center=result?.displayPose?.center;
+  const center=displayPose?.center;
+  $('target').style.setProperty('--tracking-opacity',String(displayOpacity));
   targetVisible=!!center;
   if(center&&video?.videoWidth) {
     const point=sourcePoint(center,video.videoWidth,video.videoHeight,$('app').clientWidth,$('app').clientHeight,type==='camera'?'cover':'contain');
     targetVisible=point.x>=0&&point.x<=$('app').clientWidth&&point.y>=0&&point.y<=$('app').clientHeight;
-    for(const id of ['target','seek-diamond']){$(id).style.left=point.x+'px';$(id).style.top=point.y+'px';}
-    $('seek-diamond').style.setProperty('--seek-x',($('app').clientWidth/2-point.x-14)+'px');
-    $('seek-diamond').style.setProperty('--seek-y',($('app').clientHeight/2-point.y-14)+'px');
+    $('target').style.left=point.x+'px';$('target').style.top=point.y+'px';
   }
   game.tracked=targetVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
-  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?'角度不确定 · 请缓慢移动手机':'寻找汉堡 · 请保持完整入镜';
+  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):'寻找汉堡 · 请保持完整入镜';
   $('recognition-status').textContent='桌面实验识别 · '+message;
   $('tracking-hint').textContent=game.destroyed?'核心已击破 · 重置后再试':message;
-  render();if(game.tracked&&!wasTracked)acquire();
+  render();
+  // Selection persists through geometry uncertainty; only a current location
+  // may announce the single target, once per sortie. Held positions stay silent.
+  if(targetVisible&&displayStatus==='measured'&&result?.tracking==='found')announceLock();
 }
 function renderCooldown() {
   const now = performance.now();
@@ -75,13 +77,22 @@ function feedback(title='', detail='') {
   $('feedback').lastElementChild.textContent=detail;
   $('feedback').classList.toggle('missed',title==='MISSED');
 }
-function acquire() {
-  if (game.destroyed || !game.tracked) return;
-  const diamond=$('seek-diamond');
-  diamond.classList.remove('acquiring');
-  void diamond.offsetWidth;
-  diamond.classList.add('acquiring');
-  audio.effect('lock');
+function announceLock() {
+  if (game.destroyed || lockAnnounced) return;
+  lockAnnounced=true;audio.effect('lock');
+}
+function renderDiagnostics(d) {
+  if(!d||!$('settings').open||performance.now()-lastDiagnosticsPaint<250)return;
+  lastDiagnosticsPaint=performance.now();
+  const ms=value=>value===null?'—':Math.round(value)+' ms';
+  $('ar-diagnostics').textContent=[
+    `画面通知：${d.frameClock==='video-frame-callback'?'逐帧回调':'时间轮询（估计）'}`,
+    `新帧间隔 ${ms(d.frameIntervalMs)} · 距上帧 ${ms(d.frameAgeMs)}`,
+    `像素读取 ${ms(d.readbackMs)} · 识别计算 ${ms(d.processingMs)}`,
+    `计算往返 ${ms(d.turnaroundMs)} · 结果年龄 ${ms(d.resultAgeMs)}`,
+    `画面超时 ${d.frameStaleEvents} 次 · 结果过期 ${d.resultExpiredEvents} 次`,
+    d.resultExpired?'当前结果已过期，不可攻击':d.frameStale?'当前画面已超时，不可攻击':'',
+  ].filter(Boolean).join('\n');
 }
 function enter() {
   if (active) return;
@@ -89,7 +100,7 @@ function enter() {
   $('title-screen').hidden=$('brief').hidden=true;
   $('mission').hidden=false;
   $('app').classList.replace('briefing','playing');
-  render(); acquire();
+  render(); if(getSource().type==='demo'&&game.tracked)announceLock();
 }
 function cameraMessage(message){$('camera-error').textContent=message;if(active)$('radio-text').textContent=message;}
 function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';orientationController?.refreshSource();}
@@ -151,10 +162,10 @@ function fire() {
 function reset() {
   for (const timer of shotTimers) clearTimeout(timer);
   shotTimers.clear(); clearTimeout(feedbackTimer); effects.clear();
-  game.reset(); audio.stop(); recognitionController?.reset(); feedback();
+  game.reset();lockAnnounced=false; audio.stop(); recognitionController?.reset(); feedback();
   if(getSource().type!=='demo'){game.tracked=false;game.exposed=false;targetVisible=false;}
   $('radio-text').textContent='目标已确认。准备好就开火。';
-  render(); acquire();
+  render(); if(getSource().type==='demo'&&game.tracked)announceLock();
 }
 $('show-brief').addEventListener('click', () => {
   $('title-screen').hidden=true; $('brief').hidden=false;
@@ -168,8 +179,7 @@ $('tracking-toggle').addEventListener('click', () => {
   if(getSource().type!=='demo')return;
   game.tracked=!game.tracked;
   $('radio-text').textContent=game.tracked?'目标重新确认。':'目标丢失。将目标移回视野。';
-  if (!game.tracked) $('seek-diamond').classList.remove('acquiring');
-  render(); if(game.tracked) acquire();
+  render(); if(game.tracked)announceLock();
 });
 for (const [id,value] of [['exposed',true],['blocked',false]]) {
   $(id).addEventListener('click', () => {
@@ -186,6 +196,12 @@ for (const id of ['sound','mission-sound']) $(id).addEventListener('click', () =
     button.textContent=(buttonId==='sound'?'音效 ':'原作音频 ')+(muted?'OFF':'ON');
     button.setAttribute('aria-pressed',String(!muted));
   }
+});
+$('export-diagnostics').addEventListener('click',()=>{
+  const data=recognitionController.diagnostics();
+  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download='burger-runtime-v8.json';
+  link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
 $('fullscreen').addEventListener('click',async () => {
   try {

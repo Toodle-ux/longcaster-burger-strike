@@ -29,6 +29,16 @@
  * Weak boundaries (~4s), glare, distant targets and camera motion
  * still fail. Near-level reference photo gives a 10-20 degree range (unknown),
  * not a verified level-view success. No calibrated angles or iPhone live test.
+ * 2026-10-25: independent sesame-cap evidence now supports overhead views
+ * without visible filling. Cap-only evidence never enables an exposed state.
+ * A held display may translate from the last measured image for <=250 ms,
+ * then freeze/fade until 500 ms; displayMotion identifies this UI-only cue.
+ * Original top photos 209/210 give blocked, bottom photo 212 remains lost.
+ * Old table replay: 111 found / 23 held of 134 frames. New phone SCREEN
+ * recording (browser chrome cropped, HUD still present): 304 found / 95 held /
+ * 108 lost of 507 frames at 10 Hz. These are development output counts, not
+ * accuracy. Multiple burgers and distant/blurred views still lose or swap
+ * candidates. Screen recordings cannot validate raw phone camera throughput.
  */
 (() => {
   const modelAPI=globalThis.BurgerModel,geometry=modelAPI.presets.candidate;
@@ -61,16 +71,31 @@
     for(let i=0;i<polygon.length;i++){
       const a=polygon[i],b=polygon[(i+1)%polygon.length],dx=b.x-a.x,dy=b.y-a.y;
       const t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1);
-      best=Math.min(best,Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy));
+      // One square root per point, not per polygon edge. Same distance metric.
+      const ex=p.x-a.x-t*dx,ey=p.y-a.y-t*dy;
+      best=Math.min(best,ex*ex+ey*ey);
     }
-    return best;
+    return Math.sqrt(best);
+  }
+  function sesameEvidence(frame,cap,whiteComponents) {
+    const w=cap.right-cap.left+1,h=cap.bottom-cap.top+1,cx=(cap.left+cap.right)/2,cy=(cap.top+cap.bottom)/2;
+    const spots=whiteComponents.filter(q=>{
+      if(q.count>w*h*.025||q.count<1||((q.x-cx)/(w*.43))**2+((q.y-cy)/(h*.43))**2>1)return false;
+      const x=Math.round(q.x),y=Math.round(q.y),d=Math.max(2,Math.round(w*.06)),k=y*frame.w+x;
+      return x>d&&y>d&&x<frame.w-d&&y<frame.h-d&&[k-d,k+d,k-d*frame.w,k+d*frame.w].filter(j=>frame.labels[j]===BUN).length>=3;
+    });
+    // Several separated pale islands surrounded by orange; a single glare,
+    // HUD line or pale table edge is not evidence of a sesame bun.
+    const spread=spots.length?bounds(spots):null;
+    return {count:spots.length,strong:spots.length>=3&&spots.reduce((s,p)=>s+p.count,0)>=5&&
+      spread.right-spread.left>w*.22&&spread.bottom-spread.top>h*.18};
   }
   function capObservation(input,frame,selection) {
     // Red-orange crown proposal, separate from broad BUN material scoring.
     // This empirical colour test can fail on reddish wood, shadows or glare.
     // Convex completion bridges sesame holes; it is an observed candidate,
     // not a model silhouette or a guaranteed complete segmentation.
-    const data=input.data,greens=components(frame,GREEN,5);
+    const data=input.data,greens=components(frame,GREEN,5),whites=components(frame,WHITE,1);
     // Start broad to retain the orange rim. Tighten only when it merges with
     // the wooden background; a single strict threshold clips the crown and
     // can itself turn an oblique view into a falsely shallow one.
@@ -92,7 +117,10 @@
         const gw=g.right-g.left+1;
         return gw>=w*.4&&gw<=w*1.6&&Math.abs(g.x-q.x)<w*.5&&g.y>q.y&&g.y-q.y<w*1.2&&g.count>5;
       });
-      if(!green)continue;
+      const sesame=sesameEvidence(frame,q,whites);
+      // Overhead views hide the filling. They may propose a cap independently;
+      // acceptance still requires a rounded complete contour and a top-view fit.
+      if(!green&&!(h/w>=.65&&sesame.strong))continue;
       const points=[];let white=0;
       for(let y=q.top;y<=q.bottom;y++)for(let x=q.left;x<=q.right;x++){
         const k=y*frame.w+x;
@@ -108,7 +136,7 @@
         return Math.hypot(p.x-next.x,p.y-next.y)>w*.45&&(p.y+next.y)/2<q.bottom-h*.2;
       });
       if(bridge)continue;
-      candidates.push({points:outline,...q,width:w,green,redRatio});
+      candidates.push({points:outline,...q,width:w,green,redRatio,sesame});
     }
     candidates.sort((a,b)=>b.count-a.count);
     // Do not choose between two similarly large orange/green objects.
@@ -322,7 +350,7 @@
   }
   function empty(timestampMs,reason='no-supported-target') {
     return {timestampMs,evidenceTimestampMs:null,tracking:'lost',targetFound:false,coreCenter:null,coreBounds:null,pose:null,displayPose:null,
-      displayStatus:'none',displayAgeMs:null,displayOpacity:0,
+      displayStatus:'none',displayAgeMs:null,displayOpacity:0,displayMotion:null,
       bunContour:null,viewClass:'unknown',elevationRangeDegrees:null,
       attackRegion:null,modelAttackability:'unknown',modelFillingFractionRange:null,
       poseStatus:'unknown',attackability:'unknown',reason,experimental:true,projection:'orthographic-approximation'};
@@ -331,14 +359,28 @@
     constructor({mode='handheld'}={}){templates??=buildTemplates();this.mode=mode;this.reset();}
     reset(){this.last=null;this.lock=null;this.previous=null;this.lastTime=-Infinity;this.selection=null;this.streak=0;this.stableSince=null;}
     select(x,y){this.reset();this.selection={x,y};}
-    missing(timestampMs,reason='short-gap-display-only') {
+    missing(timestampMs,reason='short-gap-display-only',{frame}={}) {
       this.streak=0;this.stableSince=null;
       const out=empty(timestampMs,reason),age=this.lock?timestampMs-this.lock.time:Infinity;
       // A held estimate never refreshes its own evidence time or becomes a
       // measurement. Keep no fresh core/pose/attack permission on missing input.
       if(age>=0&&age<=HOLD_MS) {
-        Object.assign(out,{tracking:'unknown',displayPose:this.lock.display,evidenceTimestampMs:this.lock.time,
-          displayStatus:'held',displayAgeMs:age,displayOpacity:.65*(1-age/HOLD_MS)});
+        let display=this.lock.heldDisplay??this.lock.display,displayMotion='stationary';
+        // At most 250 ms of image-supported translation from the last measured
+        // anchor. Never chain predictions, extrapolate velocity, refresh the
+        // evidence time, change scale/tilt, or enable attacks from this estimate.
+        if(frame&&this.lock.frame&&age<=250){
+          const move=translation(this.lock.frame,frame,this.lock.raw);
+          const dx=move?move.x-this.lock.raw.x:0,dy=move?move.y-this.lock.raw.y:0;
+          if(move?.correlation>.9&&Math.hypot(dx,dy)<=this.lock.raw.scale*geometry.fillingDiameter*.45){
+            const anchor=this.lock.display;
+            display={...anchor,center:{x:anchor.center.x+dx/frame.w,y:anchor.center.y+dy/frame.h}};
+            this.lock.heldDisplay=display;
+            displayMotion='image-translation';
+          }
+        }
+        Object.assign(out,{tracking:'unknown',displayPose:display,evidenceTimestampMs:this.lock.time,
+          displayStatus:'held',displayAgeMs:age,displayMotion,displayOpacity:.85*Math.min(1,(HOLD_MS-age)/350)});
       }else{this.last=null;this.lock=null;this.previous=null;}
       return out;
     }
@@ -352,7 +394,7 @@
       if(this.last&&timestampMs-(this.lock??this.last).time>HOLD_MS){this.last=null;this.lock=null;this.previous=null;this.streak=0;this.stableSince=null;}
       this.lastTime=timestampMs;const frame=frameData(input);frame.table=this.mode==='table';
       frame.cap=frame.table?capObservation(input,frame,this.selection):null;
-      if(frame.table&&!frame.cap)return this.missing(timestampMs,'no-complete-cap');
+      if(frame.table&&!frame.cap)return this.missing(timestampMs,'no-complete-cap',{frame});
       const contour=frame.cap?.points.map(p=>({x:p.x/frame.w,y:p.y/frame.h}))??null;
       const hypotheses=frame.table?[]:seeds(frame,this.selection),reference=this.last?.raw;
       if(frame.table){
@@ -381,7 +423,11 @@
       }
       const fitted=starts.map(p=>refine(frame,p,prior,dtMs)).sort((a,b)=>b.merit-a.merit);
       const isSupported=q=>{
-        if(frame.table)return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.upper>.45&&q.e.greens>=2&&q.e.darks>=2;
+        if(frame.table){
+          const layered=q.e.greens>=2&&q.e.darks>=2;
+          const top=frame.cap.sesame.strong&&templates[q.t].elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
+          return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.upper>.45&&(layered||top);
+        }
         const freshTop=hypotheses.some(p=>p.freshTop&&Math.hypot(p.x-q.x,p.y-q.y)<q.scale*8&&Math.abs(Math.log(p.scale/q.scale))<.3);
         // A small upside-down model on one green leaf can score highly. Require
         // both green and dark filling evidence, or fresh sesame-cap evidence.
@@ -397,7 +443,7 @@
       const supported=supportedFits.length>0,best=supportedFits[0]??visuallySupported[0]??fitted[0];
       if(!supported) {
         const reason=visuallySupported.length?'continuity-rejected':best?'weak-model-fit':'no-supported-target';
-        const out=this.missing(timestampMs,reason);
+        const out=this.missing(timestampMs,reason,{frame});
         out.bunContour=contour;out.debug=best?{fit:best.e,continuity:continuity(best,reference,dtMs)}:null;return out;
       }
       // Near the symmetry axis, in-plane rotation is unobservable and irrelevant.
@@ -410,7 +456,7 @@
       // disagreement disqualifies a candidate as a future hold anchor.
       const placementUncertain=supportedFits.some(p=>p!==best&&best.merit-p.merit<.035&&
         (Math.hypot(p.x-best.x,p.y-best.y)>best.scale*geometry.fillingDiameter*.2||Math.abs(Math.log(p.scale/best.scale))>.18));
-      if(this.lock&&placementUncertain)return {...this.missing(timestampMs,'uncertain-placement'),bunContour:contour};
+      if(this.lock&&placementUncertain)return {...this.missing(timestampMs,'uncertain-placement',{frame}),bunContour:contour};
       const steady=best.e.score>=.63&&!placementUncertain;
       this.streak=steady?(continuous?this.streak+1:1):0;
       if(!steady)this.stableSince=null;else if(!continuous||this.stableSince===null)this.stableSince=timestampMs;
@@ -426,15 +472,19 @@
         display.rollDegrees=old.rollDegrees+wrap(pose.rollDegrees-old.rollDegrees)*a;
         display.elevationDegrees=old.elevationDegrees+(pose.elevationDegrees-old.elevationDegrees)*(1-Math.exp(-dtMs/167));
       }
-      this.last={raw,display,time:timestampMs};this.previous=frame;this.selection=null;
+      this.last={raw,display,time:timestampMs,frame};this.previous=frame;this.selection=null;
       if(temporal&&steady&&(this.lock||this.streak>=3&&timestampMs-this.stableSince>=120))this.lock=this.last;
       // A display neighbourhood only, NOT a calibrated confidence interval or
       // a hittable filling mask. poseStatus carries unresolved fit ambiguity.
       const radius=best.scale*(ambiguous?3:1.5);
-      const possibleAngles=frame.table?supportedFits.filter(p=>best.e.score-p.e.score<.045).map(p=>templates[p.t].elevation):[];
+      // A cap-only observation must not manufacture certainty by discarding
+      // shallower contour fits solely because their filling was not detected.
+      const capOnly=frame.table&&!(best.e.greens>=2&&best.e.darks>=2);
+      const plausibleFits=(capOnly?fitted:supportedFits).filter(p=>best.e.score-p.e.score<.045);
+      const possibleAngles=frame.table?plausibleFits.map(p=>templates[p.t].elevation):[];
       const angleRange=possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null;
       const regionAPI=globalThis.BurgerAttackRegion;
-      const regionEvidence=regionAPI?.evaluate(supportedFits.filter(p=>best.e.score-p.e.score<.045).map(p=>templates[p.t].elevation));
+      const regionEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templates[p.t].elevation));
       return {...empty(timestampMs),evidenceTimestampMs:timestampMs,tracking:'found',targetFound:true,
         coreCenter:pose.center,coreBounds:{x:(best.x-radius)/frame.w,y:(best.y-radius)/frame.h,width:2*radius/frame.w,height:2*radius/frame.h},
         pose,displayPose:display,poseStatus:ambiguous?'ambiguous':'approximate',reason:ambiguous?'competing-poses':'current-model-fit',
@@ -443,13 +493,14 @@
         // not a fresh target and missing() clears this preview immediately.
         attackRegion:regionAPI?{center:{...pose.center},radiusMm:regionAPI.RULE.radiusMm,
           radiusX:best.scale*regionAPI.RULE.radiusMm/frame.w,radiusY:best.scale*regionAPI.RULE.radiusMm/frame.h}:null,
-        modelAttackability:placementUncertain?'unknown':regionEvidence?.status??'unknown',
+        modelAttackability:placementUncertain||capOnly&&regionEvidence?.status==='exposed'?'unknown':regionEvidence?.status??'unknown',
         modelFillingFractionRange:regionEvidence?.fillingFractionRange??null,
         bunContour:contour,elevationRangeDegrees:angleRange,
         viewClass:angleRange?(angleRange[0]>=30?'oblique-top':angleRange[1]<=10?'side':'unknown'):null,
         // Geometric self-occlusion only. Fingers are absent from the mesh.
         modelCenterSurface:ambiguous&&templates[competing.t].centerMaterial!==templates[best.t].centerMaterial?'unknown':templates[best.t].centerMaterial,
         debug:{fit:best.e,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
+          capOnly,sesame:frame.cap?.sesame??null,
           streak:this.streak,holdReady:!!this.lock,placementUncertain,continuity:continuity(best,reference,dtMs)}};
     }
   }
