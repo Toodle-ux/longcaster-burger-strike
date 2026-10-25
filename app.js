@@ -1,4 +1,6 @@
-import {setupOrientation} from './orientation.mjs?v=4';
+import {setupRecognition,sourcePoint} from './recognition.mjs?v=7';
+import {createAudio} from './audio.mjs?v=7';
+import {setupOrientation} from './orientation.mjs?v=7';
 import {Mission} from './engine.mjs?v=4';
 import {setupLocalVideo} from './local-video.mjs?v=5';
 import {createEffects} from './effects.mjs?v=4';
@@ -8,21 +10,38 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const effects = createEffects($('effects'), $('target'), reduced);
 const shotTimers = new Set();
 let active = false, stream = null, cameraPending = false, cameraGeneration = 0;
-let feedbackTimer, muted = true, audio;
-function tone(freq = 500, length = .1, type = 'sine') {
-  if (muted) return;
-  try {
-    audio ??= new (window.AudioContext || window.webkitAudioContext)();
-    audio.resume();
-    const oscillator = audio.createOscillator(), gain = audio.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(freq, audio.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(Math.max(45, freq/3), audio.currentTime+length);
-    gain.gain.setValueAtTime(.07, audio.currentTime);
-    gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime+length);
-    oscillator.connect(gain).connect(audio.destination);
-    oscillator.start(); oscillator.stop(audio.currentTime+length);
-  } catch {}
+let orientationController,recognitionController;
+let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo';
+const audio=createAudio();
+function getSource(){return stream?{type:'camera',video:$('camera')}:localVideo.hasSource()?{type:'video',video:$('local-video')}:{type:'demo',video:null};}
+function applyRecognition(observation) {
+  const {type,video,result,state,failed}=observation;
+  if(type!==lastRecognitionType){lastRecognitionType=type;reset();}
+  const simulated=type==='demo';
+  $('simulation-controls').hidden=!simulated;
+  $('target').classList.toggle('uncertain',!simulated&&state==='unknown');
+  if(simulated) {
+    targetVisible=true;
+    for(const id of ['target','seek-diamond']){$(id).style.left='';$(id).style.top='';}
+    $('recognition-status').textContent='演示模式 · 手动切换核心状态';
+    $('tracking-hint').textContent='演示模式 · 可在测试设置切换遮挡';
+    render();return;
+  }
+  const wasTracked=game.tracked;
+  const center=result?.displayPose?.center;
+  targetVisible=!!center;
+  if(center&&video?.videoWidth) {
+    const point=sourcePoint(center,video.videoWidth,video.videoHeight,$('app').clientWidth,$('app').clientHeight,type==='camera'?'cover':'contain');
+    targetVisible=point.x>=0&&point.x<=$('app').clientWidth&&point.y>=0&&point.y<=$('app').clientHeight;
+    for(const id of ['target','seek-diamond']){$(id).style.left=point.x+'px';$(id).style.top=point.y+'px';}
+    $('seek-diamond').style.setProperty('--seek-x',($('app').clientWidth/2-point.x-14)+'px');
+    $('seek-diamond').style.setProperty('--seek-y',($('app').clientHeight/2-point.y-14)+'px');
+  }
+  game.tracked=targetVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
+  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?'角度不确定 · 请缓慢移动手机':'寻找汉堡 · 请保持完整入镜';
+  $('recognition-status').textContent='桌面实验识别 · '+message;
+  $('tracking-hint').textContent=game.destroyed?'核心已击破 · 重置后再试':message;
+  render();if(game.tracked&&!wasTracked)acquire();
 }
 function renderCooldown() {
   const now = performance.now();
@@ -35,14 +54,14 @@ function renderCooldown() {
   const ready=game.readyAt.filter(time => time<=now).length;
   const status=`导弹就绪 ${ready}/2`;
   if ($('reload-status').textContent!==status) $('reload-status').textContent=status;
-  $('fire').lastElementChild.textContent = game.destroyed ? '目标已击破' : !game.tracked ? '目标丢失' : !game.ammo ? '弹药耗尽' : !ready ? '装填中' : '发射导弹';
+  $('fire').lastElementChild.textContent = game.destroyed ? '目标已击破' : !game.tracked ? '等待确认目标' : !game.ammo ? '弹药耗尽' : !ready ? '装填中' : '发射导弹';
 }
 function render() {
   $('ammo').textContent=String(game.ammo).padStart(2,'0');
   $('score').textContent=String(game.score).padStart(6,'0');
   $('target').classList.toggle('blocked',!game.exposed);
   $('target').classList.toggle('destroyed',game.destroyed);
-  $('target').classList.toggle('lost',!game.tracked);
+  $('target').classList.toggle('lost',getSource().type==='demo'?!game.tracked:!targetVisible);
   $('exposed').setAttribute('aria-pressed',String(game.exposed));
   $('blocked').setAttribute('aria-pressed',String(!game.exposed));
   $('exposed').disabled=$('blocked').disabled=game.destroyed;
@@ -62,6 +81,7 @@ function acquire() {
   diamond.classList.remove('acquiring');
   void diamond.offsetWidth;
   diamond.classList.add('acquiring');
+  audio.effect('lock');
 }
 function enter() {
   if (active) return;
@@ -72,9 +92,9 @@ function enter() {
   render(); acquire();
 }
 function cameraMessage(message){$('camera-error').textContent=message;if(active)$('radio-text').textContent=message;}
-function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';}
+function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';orientationController?.refreshSource();}
 function stopCamera(){cameraGeneration++;cameraPending=false;const old=stream;stream=null;if(old)old.getTracks().forEach(t=>t.stop());$('camera').srcObject=null;updateCamera();}
-async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}localVideo.clear();stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();$('radio-text').textContent='将汉堡放在中央目标框内。当前由测试开关模拟核心状态。';}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
+async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}localVideo.clear();stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();updateCamera();orientationController.offer();$('radio-text').textContent='将汉堡放在桌上，缓慢改变观察角度。';}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
 
 
 const localVideo=setupLocalVideo({
@@ -86,35 +106,42 @@ const localVideo=setupLocalVideo({
     updateCamera();
     if (present) {
       enter(); $('settings').open=false;
-      cameraMessage('本地视频模式。核心位置与遮挡仍由测试设置模拟。');
+      cameraMessage('本地视频实验识别。请使用完整拍到桌面汉堡的视频。');
     }
   },
   onMessage:cameraMessage,
 });
-for (const id of ['choose-video','change-video']) $(id).addEventListener('click', () => localVideo.choose());
+for (const id of ['choose-video','change-video']) $(id).addEventListener('click', () => {audio.unlock();localVideo.choose();});
 
 function fire() {
   if (!active) return;
+  if(recognitionController)applyRecognition(recognitionController.current());
+  audio.unlock();
   const shot=game.fire(performance.now());
   if (!shot) return;
   clearTimeout(feedbackTimer);
   feedback();
   $('radio-text').textContent='导弹发射。';
-  tone(350,.3,'sawtooth');
+  audio.effect('launch');
   render(); effects.launch(shot);
   const timer=setTimeout(() => {
     shotTimers.delete(timer);
+    applyRecognition(recognitionController.current());
+    // A paused, lost or newly occluded live target must not score from old evidence.
+    if(getSource().type!=='demo'&&(!game.tracked||!game.exposed)) {
+      const pending=game.pending.get(shot.id);if(pending)pending.hit=false;
+    }
     const result=game.resolve(shot.id);
     if (!result) return;
     if (result==='destroyed') {
       clearTimeout(feedbackTimer);
       feedback('DESTROYED','核心击破 · +400');
-      $('radio-text').textContent='漂亮，Trigger。午餐时间到了。';
-      tone(130,.45,'triangle');
+      const voice=voiceCount++%2===0?'sandwich':'burger';
+      $('radio-text').textContent=voice==='sandwich'?'办得到的人，学 Trigger 去做三明治。':'（Longcaster：汉堡通信）';
+      audio.feedback(voice);
     } else {
-      feedback('MISSED',game.ammo?'核心被遮挡 · 未得分':'弹药已耗尽 · 请重置任务');
-      $('radio-text').textContent='面包挡住了核心。切换“核心露出”再试一次。';
-      tone(140,.2);
+      feedback('MISSED',game.ammo?'未确认命中 · 未得分':'弹药已耗尽 · 请重置任务');
+      $('radio-text').textContent=getSource().type==='demo'?'面包挡住了核心。切换“核心露出”再试一次。':'请保持目标在画面内，找到核心露出的角度。';
       feedbackTimer=setTimeout(() => feedback(),1800);
     }
     render();
@@ -124,19 +151,21 @@ function fire() {
 function reset() {
   for (const timer of shotTimers) clearTimeout(timer);
   shotTimers.clear(); clearTimeout(feedbackTimer); effects.clear();
-  game.reset(); feedback();
+  game.reset(); audio.stop(); recognitionController?.reset(); feedback();
+  if(getSource().type!=='demo'){game.tracked=false;game.exposed=false;targetVisible=false;}
   $('radio-text').textContent='目标已确认。准备好就开火。';
   render(); acquire();
 }
 $('show-brief').addEventListener('click', () => {
   $('title-screen').hidden=true; $('brief').hidden=false;
 });
-$('start').addEventListener('click', () => {tone(); startCamera();});
-$('demo').addEventListener('click', () => {if(cameraPending) stopCamera(); enter();});
-$('camera-toggle').addEventListener('click', () => stream?stopCamera():startCamera());
+$('start').addEventListener('click', () => {audio.unlock(); startCamera();});
+$('demo').addEventListener('click', () => {audio.unlock();if(cameraPending) stopCamera(); enter();});
+$('camera-toggle').addEventListener('click', () => {audio.unlock();stream?stopCamera():startCamera();});
 $('fire').addEventListener('click',fire);
 $('reset').addEventListener('click',reset);
 $('tracking-toggle').addEventListener('click', () => {
+  if(getSource().type!=='demo')return;
   game.tracked=!game.tracked;
   $('radio-text').textContent=game.tracked?'目标重新确认。':'目标丢失。将目标移回视野。';
   if (!game.tracked) $('seek-diamond').classList.remove('acquiring');
@@ -144,20 +173,19 @@ $('tracking-toggle').addEventListener('click', () => {
 });
 for (const [id,value] of [['exposed',true],['blocked',false]]) {
   $(id).addEventListener('click', () => {
-    if (!game.setExposure(value)) return;
+    if (getSource().type!=='demo'||!game.setExposure(value)) return;
     clearTimeout(feedbackTimer); feedback();
     $('radio-text').textContent=value?'核心露出，允许攻击。':'核心被面包遮挡，攻击不会得分。';
     render();
   });
 }
 for (const id of ['sound','mission-sound']) $(id).addEventListener('click', () => {
-  muted=!muted;
+  muted=!muted;audio.setEnabled(!muted);
   for (const buttonId of ['sound','mission-sound']) {
     const button=$(buttonId);
-    button.textContent=(buttonId==='sound'?'音效 ':'合成音效 ')+(muted?'OFF':'ON');
+    button.textContent=(buttonId==='sound'?'音效 ':'原作音频 ')+(muted?'OFF':'ON');
     button.setAttribute('aria-pressed',String(!muted));
   }
-  tone();
 });
 $('fullscreen').addEventListener('click',async () => {
   try {
@@ -174,9 +202,12 @@ document.addEventListener('keydown',e => {
     e.preventDefault(); fire();
   }
 });
-const stopOrientation=setupOrientation({button:$('orientation-toggle'),status:$('orientation-status'),rollGroup:$('attitude-roll'),pitchGroup:$('attitude-pitch'),reduced});
+orientationController=setupOrientation({button:$('orientation-toggle'),status:$('orientation-status'),rollGroup:$('attitude-roll'),pitchGroup:$('attitude-pitch'),reduced,getSource,prompt:$('orientation-prompt'),allow:$('orientation-allow'),skip:$('orientation-skip')});
+recognitionController=setupRecognition({getSource,onResult:applyRecognition});
 // Only two cooldown indicators need updating, even when no camera is available.
 setInterval(() => {if(active && !document.hidden) renderCooldown();},50);
 window.addEventListener('pagehide', () => {
-  stopOrientation(); stopCamera(); localVideo.clear(); reset();
+  orientationController.stop(); recognitionController.stop(); audio.stop(); stopCamera(); localVideo.clear(); reset();
 });
+
+window.addEventListener('pageshow', () => {orientationController.resume();recognitionController.resume();});

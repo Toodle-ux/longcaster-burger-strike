@@ -1,89 +1,99 @@
 import {attitude, smoothAngle} from './attitude.mjs';
 
-export function setupOrientation({button, status, rollGroup, pitchGroup, reduced}) {
-  // Display scale is independent of the sensor calculation.
-  for (let angle = -90; angle <= 90; angle += 5) {
-    const y = -angle * 12;
-    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    const dash = angle < 0 ? 'stroke-dasharray="3 3"' : '';
-    const width = angle === 0 ? 79 : 48;
-    group.innerHTML = `<path d="M${-width} ${y + 4}v-4h${width - 18} M18 ${y}h${width - 18}v4" ${dash}/>` +
-      (angle === 0 ? '' : `<text x="-66" y="${y + 3}" text-anchor="end">${angle}</text><text x="66" y="${y + 3}">${angle}</text>`);
-    pitchGroup.append(group);
+// Recordings cannot use the viewing phone's attitude.
+export function chooseDriver(source, enabled, age) {
+  return source==='camera' && enabled && age>=0 && age<1500 ? 'sensor' : 'static';
+}
+export function setupOrientation({button,status,rollGroup,pitchGroup,reduced,getSource,prompt,allow,skip}) {
+  for(let angle=-90;angle<=90;angle+=5) {
+    const y=-angle*12,g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    const mark=angle===0?'center':angle>0?'pos':'neg';
+    g.innerHTML=`<image class="hud-texture" href="./assets/hud/hud_pitch_mark_${mark}.png" x="-79" y="${y-1.6}" width="158" height="3.2"/>`+
+      (angle===0?'':`<text x="-91" y="${y+3}" text-anchor="end">${angle}</text><text x="91" y="${y+3}">${angle}</text>`);
+    pitchGroup.append(g);
   }
-  let listening = false, pending = false, generation = 0, timeout, frame;
-  let latest = null, target = null, current = null, lastTime = 0;
-  const screenAngle = () => screen.orientation?.angle ?? window.orientation ?? 0;
+  let source='demo',enabled=false,pending=false,generation=0,listening=false,disposed=false;
+  let sensor=null,sensorTime=-Infinity,lastDevice=null,reason='',frame,timer,lastDraw=0;
+  let target={roll:0,pitch:0},current={...target};
+  const screenAngle=()=>screen.orientation?.angle??window.orientation??0;
   function draw(value) {
-    rollGroup.setAttribute('transform', `rotate(${value.roll})`);
-    pitchGroup.setAttribute('transform', `translate(0 ${value.pitch * 12})`);
+    rollGroup.setAttribute('transform',`rotate(${value.roll})`);
+    pitchGroup.setAttribute('transform',`translate(0 ${value.pitch*12})`);
   }
-  function animate(time) {
-    if (!listening || !target) return;
-    const fraction = reduced ? 1 : 1 - Math.exp(-Math.min(time - lastTime, 100) / 70);
-    lastTime = time;
-    current.pitch += (target.pitch - current.pitch) * fraction;
-    current.roll = smoothAngle(current.roll, target.roll ?? current.roll, fraction);
-    draw(current);
-    frame = requestAnimationFrame(animate);
+  function animate(now) {
+    if(disposed)return;
+    const t=reduced?1:1-Math.exp(-Math.min(now-lastDraw,100)/100);lastDraw=now;
+    current.roll=smoothAngle(current.roll,target.roll,t);
+    current.pitch+=(target.pitch-current.pitch)*t;
+    draw(current);frame=requestAnimationFrame(animate);
   }
-  function onOrientation(event) {
-    const value = attitude(event.beta, event.gamma, screenAngle());
-    if (!value) return;
-    latest = {beta:event.beta, gamma:event.gamma};
-    target = value;
-    clearTimeout(timeout);
-    status.textContent = '姿态：实时感应';
-    if (!current) {
-      current = {...value, roll:value.roll ?? 0};
-      lastTime = performance.now();
-      frame = requestAnimationFrame(animate);
+  function updateButton() {
+    button.disabled=source!=='camera'||pending;
+    button.textContent=source!=='camera'?'摄像头模式可启用':pending?'等待授权…':enabled?'关闭姿态感应':'开启姿态感应';
+    button.setAttribute('aria-pressed',String(enabled&&source==='camera'));
+    allow.disabled=pending;
+  }
+  function orientation(event) {
+    if(source!=='camera'||!enabled||document.hidden)return;
+    const value=attitude(event.beta,event.gamma,screenAngle());
+    if(!value)return;
+    lastDevice={beta:event.beta,gamma:event.gamma};sensor=value;sensorTime=performance.now();
+  }
+  function screenChanged() {if(lastDevice)sensor=attitude(lastDevice.beta,lastDevice.gamma,screenAngle());}
+  function listen(yes) {
+    if(yes===listening)return;listening=yes;
+    const method=yes?'addEventListener':'removeEventListener';
+    window[method]('deviceorientation',orientation);
+    window[method]('orientationchange',screenChanged);
+    screen.orientation?.[method]('change',screenChanged);
+  }
+  function refreshSource() {
+    const next=getSource().type;if(next===source)return;
+    generation++;pending=false;source=next;
+    sensor=null;sensorTime=-Infinity;lastDevice=null;target={roll:0,pitch:0};
+    prompt.hidden=true;listen(enabled&&source==='camera');updateButton();
+  }
+  function sample() {
+    if(disposed)return;
+    refreshSource();
+    if(!document.hidden&&chooseDriver(source,enabled,performance.now()-sensorTime)==='sensor') {
+      target={pitch:sensor.pitch,roll:sensor.roll??target.roll};status.textContent='姿态：手机传感器';
+    } else {
+      target={roll:0,pitch:0};
+      status.textContent=source==='video'?'录像模式 · 静态 HUD':pending?'等待姿态权限':`${reason?reason+' · ':enabled&&source==='camera'?'等待传感器数据 · ':''}静态 HUD`;
     }
+    timer=setTimeout(sample,100);
   }
-  function screenChanged() {
-    if (!latest) return;
-    target = attitude(latest.beta, latest.gamma, screenAngle());
-    current = {...target, roll:target.roll ?? 0};
-  }
-  function stop(message = '姿态：静态 HUD') {
-    generation++;
-    listening = pending = false;
-    window.removeEventListener('deviceorientation', onOrientation);
-    window.removeEventListener('orientationchange', screenChanged);
-    screen.orientation?.removeEventListener('change', screenChanged);
-    clearTimeout(timeout);
-    cancelAnimationFrame(frame);
-    latest = target = current = null;
-    draw({pitch:0, roll:0});
-    status.textContent = message;
-    button.textContent = '开启姿态感应';
-    button.setAttribute('aria-pressed', 'false');
-  }
-  button.addEventListener('click', async () => {
-    if (listening || pending) { stop(); return; }
-    const Sensor = window.DeviceOrientationEvent;
-    if (!Sensor) { stop('设备不支持，使用静态 HUD'); return; }
-    const request = ++generation;
-    pending = true;
-    button.textContent = '取消姿态感应';
-    status.textContent = '等待姿态权限…';
+  async function enable() {
+    if(source!=='camera'||pending)return;
+    const Sensor=window.DeviceOrientationEvent;
+    prompt.hidden=true;
+    if(!Sensor){reason='不支持姿态感应';updateButton();return;}
+    const token=++generation;pending=true;reason='';updateButton();
     try {
-      // iOS permission must be requested directly from this user gesture.
-      const permission = typeof Sensor.requestPermission === 'function' ? await Sensor.requestPermission() : 'granted';
-      if (request !== generation) return;
-      if (permission !== 'granted') { stop('未授权，使用静态 HUD'); return; }
-      pending = false;
-      listening = true;
-      button.textContent = '关闭姿态感应';
-      button.setAttribute('aria-pressed', 'true');
-      status.textContent = '等待姿态数据…';
-      window.addEventListener('deviceorientation', onOrientation);
-      window.addEventListener('orientationchange', screenChanged);
-      screen.orientation?.addEventListener('change', screenChanged);
-      timeout = setTimeout(() => stop('未收到姿态数据，使用静态 HUD'), 3000);
+      // Keep iOS permission inside the tap, before any unrelated await.
+      const permission=typeof Sensor.requestPermission==='function'?await Sensor.requestPermission():'granted';
+      if(token!==generation||disposed||source!=='camera')return;
+      enabled=permission==='granted';reason=enabled?'':'未授权';pending=false;
+      sensorTime=-Infinity;listen(enabled);updateButton();
     } catch {
-      if (request === generation) stop('姿态不可用，使用静态 HUD');
+      if(token!==generation)return;
+      pending=enabled=false;reason='姿态权限未开启';listen(false);updateButton();
     }
+  }
+  button.addEventListener('click',()=>{
+    if(enabled){generation++;enabled=false;sensorTime=-Infinity;reason='';listen(false);updateButton();}
+    else enable();
   });
-  return stop;
+  allow.addEventListener('click',enable);
+  skip.addEventListener('click',()=>{prompt.hidden=true;reason='已跳过姿态感应';});
+  function offer() {
+    refreshSource();if(source!=='camera'||enabled)return;
+    prompt.hidden=false;allow.focus();
+  }
+  document.addEventListener('visibilitychange',()=>{sensorTime=-Infinity;lastDevice=null;});
+  function stop(){disposed=true;generation++;pending=false;prompt.hidden=true;listen(false);clearTimeout(timer);cancelAnimationFrame(frame);draw({roll:0,pitch:0});}
+  function resume(){if(!disposed)return;disposed=false;sensorTime=-Infinity;listen(enabled&&source==='camera');sample();frame=requestAnimationFrame(animate);}
+  refreshSource();sample();frame=requestAnimationFrame(animate);
+  return {stop,resume,refreshSource,offer};
 }

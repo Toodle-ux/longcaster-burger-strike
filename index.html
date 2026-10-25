@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#071626"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，体验模拟锁定与导弹发射。">
-  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=5">
+  <meta name="theme-color" content="#071626"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，测试桌面汉堡识别、姿态 HUD 与导弹发射。">
+  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
 <main id="app" class="briefing">
@@ -39,49 +39,53 @@
       </div>
       <div class="brief-copy"><p class="brief-kicker">MISSION OBJECTIVE</p><h3>找到角度，击破核心。</h3><p class="brief-description">面包遮挡时无法命中。<br>从侧面接近，让肉饼核心露出。</p><div class="brief-meta"><span>TARGET <b>CORE +400</b></span><span>AIRCRAFT <b>Su-57</b></span><span>WEAPON <b>MSL × 08</b></span></div>
         <button id="start" class="blue-button">开始任务 <span>›</span></button><button id="choose-video" class="text-button">选择视频开始 →</button><button id="demo" class="text-button">不启用摄像头，进入演示 →</button>
-        <p class="privacy">当前为玩法原型：识别与遮挡由测试设置模拟。<br>摄像头和所选视频仅在本机使用，不上传。视频静音播放。</p><p id="camera-error" role="status"></p>
+        <p class="privacy">实验识别：请将第四款汉堡放在桌上，保持完整入镜。<br>先不加手指、托盒或其他遮挡物。<br>摄像头和所选视频仅在本机使用，不上传。视频静音播放。</p><p id="camera-error" role="status"></p>
       </div>
     </div>
   </section>
   <section id="mission" hidden aria-label="模拟攻击任务">
     <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET BURGER <span>+400</span></div></div>
     <div class="radio"><span>AWACS Longcaster</span><p><b>≪</b> <span id="radio-text">目标已确认。准备好就开火。</span> <b>≫</b></p></div>
-    <span class="prototype-label">SIMULATION / 03</span>
+    <span class="prototype-label">TABLETOP TEST / 07</span>
     <svg class="flight-hud" viewBox="0 0 320 300" aria-label="手机姿态刻度">
-      <defs><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
-      <path class="rails" d="M47 270h-9V30h9 M273 270h9V30h-9"/>
+      <defs><filter id="hud-green" x="-10%" y="-10%" width="120%" height="120%"><feFlood flood-color="#9df5a4"/><feComposite in2="SourceAlpha" operator="in"/></filter><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
+      <image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240"/><image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240" transform="translate(320 0) scale(-1 1)"/>
       <g class="rail-ticks"><path d="M38 105h-5 M282 105h5"/><path d="M38 110h-9 M282 110h9"/><path d="M38 115h-5 M282 115h5"/><path d="M38 120h-9 M282 120h9"/><path d="M38 125h-5 M282 125h5"/><path d="M38 130h-9 M282 130h9"/><path d="M38 135h-5 M282 135h5"/><path d="M38 140h-9 M282 140h9"/><path d="M38 145h-5 M282 145h5"/><path d="M38 150h-9 M282 150h9"/><path d="M38 155h-5 M282 155h5"/><path d="M38 160h-9 M282 160h9"/><path d="M38 165h-5 M282 165h5"/><path d="M38 170h-9 M282 170h9"/><path d="M38 175h-5 M282 175h5"/><path d="M38 180h-9 M282 180h9"/><path d="M38 185h-5 M282 185h5"/><path d="M38 190h-9 M282 190h9"/><path d="M38 195h-5 M282 195h5"/></g><g clip-path="url(#ladder-clip)"><g transform="translate(160 150)"><g id="attitude-roll"><g id="attitude-pitch"></g></g></g></g>
-      <path class="boresight" d="M146 150h6l4 6 4-6 4 6 4-6h6"/>
+      <image class="hud-texture" href="./assets/hud/whiskyMark.png" x="146" y="146" width="28" height="9"/>
     </svg>
     <div id="demo-target" aria-hidden="true"><svg viewBox="0 0 240 170"><ellipse cx="120" cy="150" rx="92" ry="12" fill="#000" opacity=".4"/><path d="M34 119Q120 146 206 119L200 140Q120 165 40 140Z" fill="#bd8844"/><path d="M31 116L47 106 62 115 80 106 100 116 120 105 140 117 161 104 179 115 196 106 209 119 193 130 175 122 157 132 138 122 117 133 96 122 77 131 56 122 40 128Z" fill="#73954b"/><path d="M32 96Q120 121 208 96L204 115Q120 139 36 115Z" fill="#593626" stroke="#c28a4f"/><path d="M34 91L203 91 180 113 153 102 118 119 88 101 63 111Z" fill="#edba49"/><path d="M31 88C33 2 207 2 209 88Q120 119 31 88" fill="#c99552" stroke="#edbf76"/><g fill="#f0d6a0"><ellipse cx="80" cy="51" rx="5" ry="2"/><ellipse cx="111" cy="34" rx="5" ry="2"/><ellipse cx="153" cy="48" rx="5" ry="2"/><ellipse cx="129" cy="68" rx="5" ry="2"/></g></svg></div>
-    <div id="target" class="target" aria-label="模拟肉饼核心">
-      <svg viewBox="0 0 100 88" aria-hidden="true"><polygon class="target-shell" points="26,3 74,3 98,44 74,85 26,85 2,44"/><path class="lock-diamond" d="M50 8 86 44 50 80 14 44Z"/></svg>
+    <div id="target" class="target" aria-label="肉饼核心">
+      <span class="target-shell"></span><span class="lock-diamond"></span>
       <span class="target-title">CORE</span>
     </div>
     <div id="seek-diamond" aria-hidden="true"></div>
     <canvas id="effects" aria-hidden="true"></canvas>
     <div id="feedback" role="status" aria-live="polite"><strong></strong><span></span></div>
     <div class="loadout" aria-label="Su-57 武器状态"><div class="selected-weapon">&gt;MSL <span id="ammo">08</span></div><div>PLSL <span>--</span></div><div>DMG <span>0%</span></div>
-      <svg class="aircraft" viewBox="0 0 130 110" aria-label="Su-57 示意轮廓与两枚导弹冷却状态">
+      <svg class="aircraft" viewBox="0 0 130 110" aria-label="Su-57 原作图标与两枚导弹冷却状态">
         <defs><path id="missile-shape" d="M12 34 9 43v39l-3 8v10h12V90l-3-8V43Z"/><clipPath id="slot-0-clip"><rect id="slot-0-fill" x="0" y="34" width="25" height="66"/></clipPath><clipPath id="slot-1-clip"><rect id="slot-1-fill" x="0" y="34" width="25" height="66"/></clipPath></defs>
-        <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M65 4 61 23 60 39 54 47 48 48 30 72 31 81 49 75 52 83 42 95 44 101 59 95 59 104 63 104 65 93 67 104 71 104 71 95 86 101 88 95 78 83 81 75 99 81 100 72 82 48 76 47 70 39 69 23Z"/><path d="M65 17 62 32 65 39 68 32Z M60 41 56 67 59 94 M70 41 74 67 71 94 M58 63 62 63 62 98 M72 63 68 63 68 98 M65 43v43 M49 75 56 67 M81 75 74 67 M52 83 59 88 M78 83 71 88 M59 100h4 M67 100h4"/>
+        <image class="hud-texture" href="./assets/hud/su57.png" x="23" y="5" width="84" height="100"/><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
           <g id="slot-0"><use href="#missile-shape" opacity=".25"/><use href="#missile-shape" clip-path="url(#slot-0-clip)"/></g><g id="slot-1" transform="translate(106)"><use href="#missile-shape" opacity=".25"/><use href="#missile-shape" clip-path="url(#slot-1-clip)"/></g>
         </g>
       </svg><small>Su-57</small><span id="reload-status" class="sr-only" role="status"></span>
     </div>
     <div class="mission-actions"><details id="settings"><summary>测试设置</summary><div class="settings-panel">
-      <p class="panel-label">模拟核心 <span>尚未接入实物识别</span></p>
+      <p id="recognition-status" class="panel-label" role="status">演示模式 · 手动切换核心状态</p><div id="simulation-controls">
       <div class="segmented" role="group" aria-label="模拟核心状态"><button id="exposed" aria-pressed="true">核心露出</button><button id="blocked" aria-pressed="false">被面包遮挡</button></div>
       <div class="setting-row"><span>模拟目标跟踪</span><button id="tracking-toggle" class="quiet-button" aria-pressed="true">目标可见</button></div>
-      <div class="setting-row"><span id="orientation-status" role="status">姿态：静态 HUD</span><button id="orientation-toggle" class="quiet-button" aria-pressed="false">开启姿态感应</button></div>
+      </div><div class="setting-row"><span id="orientation-status" role="status">姿态：静态 HUD</span><button id="orientation-toggle" class="quiet-button" aria-pressed="false">开启姿态感应</button></div>
       <div class="setting-row"><span id="camera-status">● 演示背景</span><button id="camera-toggle" class="quiet-button">开启摄像头</button></div>
       <div class="setting-row"><button id="change-video" class="quiet-button">选择／更换视频</button><button id="close-video" class="quiet-button" hidden>关闭视频</button></div>
-      <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">合成音效 OFF</button></div>
-      <p class="settings-note">姿态只改变刻度，不决定命中。每枚导弹冷却 3 秒。目标丢失时暂停发射；PLSL 暂未开放。通信台词为临时文案。</p>
+      <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">原作音频 OFF</button></div>
+      <p class="settings-note">手机摄像头可启用姿态感应；跳过、拒绝或数据中断时为静态 HUD。录像使用静态 HUD。实验识别只针对桌上单个第四款汉堡，未验证手指或配件遮挡。中心半径 2 mm 的区域，模型估计露出至少 15% 才可命中；不确定或暂停时不能攻击。两枚导弹各冷却 3 秒；PLSL 暂未开放。</p>
     </div></details><button id="reset" class="quiet-button">↻ 重置任务</button></div>
     <div id="video-controls" hidden aria-label="本地视频播放控制"><span id="video-time">00:00 / 00:00</span><button id="video-play" class="quiet-button">暂停</button><button id="video-replay" class="quiet-button">重播</button></div>
     <button id="fire" class="fire-button"><span>FIRE</span><small>发射导弹</small></button>
+    <p id="tracking-hint" role="status">演示模式</p>
     <p class="orientation-note">横屏体验更接近座舱视野</p>
   </section>
-</main><script type="module" src="./app.js?v=5"></script>
+<section id="orientation-prompt" class="permission-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="orientation-title">
+    <div class="permission-card"><small>FLIGHT HUD / ATTITUDE</small><h2 id="orientation-title">让 HUD 跟着手机倾斜</h2><p>摄像头已开启。开启姿态感应后，刻度会随手机左右倾斜、抬起和放低而变化。</p><button id="orientation-allow" class="blue-button">开启姿态感应</button><button id="orientation-skip" class="text-button">暂时跳过，使用静态 HUD</button></div>
+  </section>
+</main><script type="module" src="./app.js?v=7"></script>
 </body></html>

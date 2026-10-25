@@ -33,3 +33,23 @@
 
 /* Keep all of the recorded frame visible, including portrait footage. */
 #local-video{display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#050a0c;pointer-events:none}.video-live #local-video{display:block}.video-live .terrain,.video-live #demo-target{display:none}.video-live #mission{background:linear-gradient(#0003,transparent 30% 70%,#0003)}#video-controls{position:absolute;left:max(4.5%,env(safe-area-inset-left));bottom:85px;display:flex;gap:7px;align-items:center;z-index:7;font:11px HUD,monospace;text-shadow:none}#video-time{background:#0d1a13dc;padding:6px;color:#c1efc5}#video-controls button{padding:10px;min-height:42px}@media(orientation:portrait){#video-controls{bottom:103px;gap:5px;font-size:10px}}@media(orientation:landscape) and (max-height:500px){#video-controls{bottom:72px}.brief-copy .text-button{padding:5px 0;min-height:30px}}
+
+/* Original alpha textures carry the original softened edges; tint at render time. */
+.hud-texture{filter:url(#hud-green)}
+.target{width:clamp(28px,3.2vw,42px);height:clamp(28px,3.2vw,42px)}
+.target-shell,.lock-diamond{position:absolute;display:block;inset:0;background:var(--hud);mask:center/contain no-repeat;-webkit-mask:center/contain no-repeat}
+.target-shell{mask-image:url('./assets/hud/hud_container_gnd01.png');-webkit-mask-image:url('./assets/hud/hud_container_gnd01.png')}
+.target.blocked .target-shell{mask-image:url('./assets/hud/hud_container_gnd02.png');-webkit-mask-image:url('./assets/hud/hud_container_gnd02.png')}
+.lock-diamond{inset:8%;background:#ff7771;mask-image:url('./assets/hud/hud_seeker01.png');-webkit-mask-image:url('./assets/hud/hud_seeker01.png')}
+.target.uncertain .lock-diamond{background:#e8d991}.target.uncertain{opacity:.55}
+.target-title{top:calc(50% - 6px);font-size:clamp(9px,1.1vw,13px);left:calc(100% + 3px)}
+#seek-diamond{border:0;background:var(--hud);mask:url('./assets/hud/hud_seeker01.png') center/contain no-repeat;-webkit-mask:url('./assets/hud/hud_seeker01.png') center/contain no-repeat;transform:translate(-50%,-50%)}
+@keyframes acquire{0%{opacity:1;transform:translate(var(--seek-x,-125px),var(--seek-y,75px)) scale(1.2)}85%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%)}}
+#feedback strong{position:relative;isolation:isolate;background:none!important;line-height:1.5;font-size:clamp(13px,1.6vw,20px)}
+#feedback strong:before{content:'';position:absolute;inset:0;z-index:-1;background:#9df5a4;mask:url('./assets/hud/HUD_UI_selected.png') center/100% 100% no-repeat;-webkit-mask:url('./assets/hud/HUD_UI_selected.png') center/100% 100% no-repeat}
+#feedback.missed strong:before{background:#ff895f}
+#tracking-hint{position:absolute;left:50%;bottom:18%;transform:translateX(-50%);width:60%;text-align:center;font:11px/1.5 Arial,sans-serif;color:#d6eadd;text-shadow:0 1px 3px #000;pointer-events:none}
+.permission-overlay{position:fixed;inset:0;z-index:30;background:#030b14b8;display:grid;place-items:center;padding:22px;backdrop-filter:blur(5px)}
+.permission-card{background:#081d2cf5;border:1px solid #70bbd990;padding:26px;max-width:390px;box-shadow:0 12px 60px #0008}
+.permission-card small{font:10px HUD,monospace;letter-spacing:2px}.permission-card h2{font-size:21px;letter-spacing:1px;margin:18px 0}.permission-card p{font-size:13px;line-height:1.8;color:#c5ddec}.permission-card button{width:100%;justify-content:center}.permission-card .text-button{text-align:center;padding-bottom:0}
+@media(orientation:landscape) and (max-height:500px){#tracking-hint{bottom:13%;font-size:10px}.permission-card{padding:20px}.permission-card h2{margin:10px 0}}
