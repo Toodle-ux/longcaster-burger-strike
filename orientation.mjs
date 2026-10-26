@@ -1,3 +1,4 @@
+import {t} from './i18n.mjs?v=9';
 import {attitude, smoothAngle} from './attitude.mjs';
 
 // Recordings cannot use the viewing phone's attitude.
@@ -29,7 +30,7 @@ export function setupOrientation({button,status,rollGroup,pitchGroup,reduced,get
   }
   function updateButton() {
     button.disabled=source!=='camera'||pending;
-    button.textContent=source!=='camera'?'摄像头模式可启用':pending?'等待授权…':enabled?'关闭姿态感应':'开启姿态感应';
+    button.textContent=t(source!=='camera'?'摄像头模式可启用':pending?'等待授权…':enabled?'关闭姿态感应':'开启姿态感应');
     button.setAttribute('aria-pressed',String(enabled&&source==='camera'));
     allow.disabled=pending;
   }
@@ -57,10 +58,10 @@ export function setupOrientation({button,status,rollGroup,pitchGroup,reduced,get
     if(disposed)return;
     refreshSource();
     if(!document.hidden&&chooseDriver(source,enabled,performance.now()-sensorTime)==='sensor') {
-      target={pitch:sensor.pitch,roll:sensor.roll??target.roll};status.textContent='姿态：手机传感器';
+      target={pitch:sensor.pitch,roll:sensor.roll??target.roll};status.textContent=t('姿态：手机传感器');
     } else {
       target={roll:0,pitch:0};
-      status.textContent=source==='video'?'录像模式 · 静态 HUD':pending?'等待姿态权限':`${reason?reason+' · ':enabled&&source==='camera'?'等待传感器数据 · ':''}静态 HUD`;
+      status.textContent=source==='video'?t('录像模式 · 静态 HUD'):pending?t('等待姿态权限'):[reason?t(reason):enabled&&source==='camera'?t('等待传感器数据'):'',t('静态 HUD')].filter(Boolean).join(' · ');
     }
     timer=setTimeout(sample,100);
   }
@@ -95,5 +96,5 @@ export function setupOrientation({button,status,rollGroup,pitchGroup,reduced,get
   function stop(){disposed=true;generation++;pending=false;prompt.hidden=true;listen(false);clearTimeout(timer);cancelAnimationFrame(frame);draw({roll:0,pitch:0});}
   function resume(){if(!disposed)return;disposed=false;sensorTime=-Infinity;listen(enabled&&source==='camera');sample();frame=requestAnimationFrame(animate);}
   refreshSource();sample();frame=requestAnimationFrame(animate);
-  return {stop,resume,refreshSource,offer};
+  return {stop,resume,refreshSource,offer,refreshLabels:updateButton};
 }

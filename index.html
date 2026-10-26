@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#071626"><meta name="description" content="Longcaster 汉堡核心攻击体验原型。开启摄像头，测试桌面汉堡识别、姿态 HUD 与导弹发射。">
-  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=8">
+  <title>BURGER STRIKE · Longcaster</title><link rel="stylesheet" href="./style.css?v=9">
 </head>
 <body>
 <main id="app" class="briefing">
@@ -13,12 +13,13 @@
   <div class="terrain" aria-hidden="true"><div class="grid"></div><div class="horizon"></div></div>
   <div class="scanlines" aria-hidden="true"></div>
   <section id="title-screen" class="title-screen" aria-labelledby="title">
-    <div class="title-rule"></div><div class="title-copy"><p>MISSION 01</p><h1 id="title">BURGER STRIKE</h1><span>OPERATION LUNCH BREAK</span></div>
+    <div class="title-language"><select class="language-select" aria-label="Language"><option value="auto">自动（浏览器语言）</option><option value="zh">中文</option><option value="ja">日本語</option><option value="en">English</option></select></div><div class="title-rule"></div><div class="title-copy"><p>MISSION 01</p><h1 id="title">BURGER STRIKE</h1><span>OPERATION LUNCH BREAK</span></div>
     <button id="show-brief" class="blue-button">进入任务简报 <span>›</span></button>
     <small class="title-foot">LONGCASTER / FAN-MADE AR EXPERIMENT</small>
   </section>
   <section id="brief" hidden aria-labelledby="brief-title">
-    <div class="brief-heading"><span>MISSION 01 / BRIEFING</span><button id="sound" class="icon-button" aria-pressed="false">音效 OFF</button></div>
+    <div class="brief-heading"><span>MISSION 01 / BRIEFING</span><select class="language-select" aria-label="Language"><option value="auto">自动（浏览器语言）</option><option value="zh">中文</option><option value="ja">日本語</option><option value="en">English</option></select><button id="sound" class="icon-button" aria-pressed="false">声音关闭 · 点此开启</button></div>
+    <p class="audio-note"><span id="brief-audio-status" role="status">声音已关闭，可点击开启。</span><br><span>原作英语语音与音效；字幕随界面语言切换。</span></p>
     <h2 id="brief-title">OPERATION LUNCH BREAK</h2>
     <div class="brief-layout">
       <div class="tactical-map" role="img" aria-label="汉堡线框示意图，红色肉饼为敌方核心，青色箭头为友军，绿色箭头标注 Trigger">
@@ -44,9 +45,9 @@
     </div>
   </section>
   <section id="mission" hidden aria-label="模拟攻击任务">
-    <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET BURGER <span>+400</span></div></div>
+    <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET CORE <span>+400</span></div></div>
     <div class="radio"><span>AWACS Longcaster</span><p><b>≪</b> <span id="radio-text">目标已确认。准备好就开火。</span> <b>≫</b></p></div>
-    <span class="prototype-label">TABLETOP TEST / 08</span>
+    <span class="prototype-label">TABLETOP TEST / 09</span><button id="mission-audio-toggle" class="audio-toggle" aria-pressed="false">声音关闭 · 点此开启</button>
     <svg class="flight-hud" viewBox="0 0 320 300" aria-label="手机姿态刻度">
       <defs><filter id="hud-green" x="-10%" y="-10%" width="120%" height="120%"><feFlood flood-color="#9df5a4"/><feComposite in2="SourceAlpha" operator="in"/></filter><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
       <image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240"/><image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240" transform="translate(320 0) scale(-1 1)"/>
@@ -68,14 +69,15 @@
         </g>
       </svg><small>Su-57</small><span id="reload-status" class="sr-only" role="status"></span>
     </div>
-    <div class="mission-actions"><details id="settings"><summary>测试设置</summary><div class="settings-panel">
+    <div class="mission-actions"><details id="settings"><summary>测试设置</summary><div class="settings-panel"><div class="setting-row"><span>Language</span><select class="language-select" aria-label="Language"><option value="auto">自动（浏览器语言）</option><option value="zh">中文</option><option value="ja">日本語</option><option value="en">English</option></select></div>
       <p id="recognition-status" class="panel-label" role="status">演示模式 · 手动切换核心状态</p><div id="simulation-controls">
       <div class="segmented" role="group" aria-label="模拟核心状态"><button id="exposed" aria-pressed="true">核心露出</button><button id="blocked" aria-pressed="false">被面包遮挡</button></div>
       <div class="setting-row"><span>模拟目标跟踪</span><button id="tracking-toggle" class="quiet-button" aria-pressed="true">目标可见</button></div>
       </div><div class="setting-row"><span id="orientation-status" role="status">姿态：静态 HUD</span><button id="orientation-toggle" class="quiet-button" aria-pressed="false">开启姿态感应</button></div>
       <div class="setting-row"><span id="camera-status">● 演示背景</span><button id="camera-toggle" class="quiet-button">开启摄像头</button></div>
       <div class="setting-row"><button id="change-video" class="quiet-button">选择／更换视频</button><button id="close-video" class="quiet-button" hidden>关闭视频</button></div>
-      <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">原作音频 OFF</button></div>
+      <div class="setting-row"><button id="fullscreen" class="quiet-button">全屏</button><button id="mission-sound" class="quiet-button" aria-pressed="false">声音关闭 · 点此开启</button></div>
+      <p id="mission-audio-status" class="audio-note" role="status">声音已关闭，可点击开启。</p>
       <details class="diagnostics"><summary>识别运行诊断</summary><pre id="ar-diagnostics">等待运行数据</pre><button id="export-diagnostics" class="quiet-button">导出诊断</button><p>只保存最近的时间与状态记录，不含图像或视频。帧通知包含浏览器调度耗时，不等于摄像头硬件掉帧。</p></details>
       <p class="settings-note">手机摄像头可启用姿态感应；跳过、拒绝或数据中断时为静态 HUD。录像使用静态 HUD。实验识别只针对桌上单个第四款汉堡，未验证手指或配件遮挡。中心半径 2 mm 的区域，模型估计露出至少 15% 才可命中；不确定或暂停时不能攻击。两枚导弹各冷却 3 秒；PLSL 暂未开放。</p>
     </div></details><button id="reset" class="quiet-button">↻ 重置任务</button></div>
@@ -87,5 +89,5 @@
 <section id="orientation-prompt" class="permission-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="orientation-title">
     <div class="permission-card"><small>FLIGHT HUD / ATTITUDE</small><h2 id="orientation-title">让 HUD 跟着手机倾斜</h2><p>摄像头已开启。开启姿态感应后，刻度会随手机左右倾斜、抬起和放低而变化。</p><button id="orientation-allow" class="blue-button">开启姿态感应</button><button id="orientation-skip" class="text-button">暂时跳过，使用静态 HUD</button></div>
   </section>
-</main><script type="module" src="./app.js?v=8"></script>
+</main><script type="module" src="./app.js?v=9"></script>
 </body></html>

@@ -1,3 +1,4 @@
+import {t} from './i18n.mjs?v=9';
 export function setupLocalVideo({video, input, controls, playButton, replayButton, closeButton, time, beforeSelect, onSource, onMessage}) {
   let url = null, generation = 0;
   const clock = seconds => {
@@ -5,8 +6,8 @@ export function setupLocalVideo({video, input, controls, playButton, replayButto
     return `${String(Math.floor(value / 60)).padStart(2,'0')}:${String(value % 60).padStart(2,'0')}`;
   };
   function update() {
-    playButton.textContent = video.ended ? '重新播放' : video.paused ? '播放' : '暂停';
-    playButton.setAttribute('aria-label', video.paused ? '播放本地视频' : '暂停本地视频');
+    playButton.textContent=t(video.ended?'重新播放':video.paused?'播放':'暂停');
+    playButton.setAttribute('aria-label',t(video.paused?'播放本地视频':'暂停本地视频'));
     time.textContent = `${clock(video.currentTime)} / ${clock(video.duration)}`;
   }
   function clear() {
@@ -61,5 +62,5 @@ export function setupLocalVideo({video, input, controls, playButton, replayButto
   });
   replayButton.addEventListener('click', () => { if (url) { video.currentTime=0; play(); } });
   closeButton.addEventListener('click', () => {clear(); onMessage('已关闭视频，返回演示背景。');});
-  return {choose:() => input.click(), clear, hasSource:() => Boolean(url)};
+  return {choose:() => input.click(), clear, hasSource:() => Boolean(url),refreshLabels:update};
 }

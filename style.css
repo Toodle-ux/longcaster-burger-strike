@@ -58,3 +58,10 @@
 .target{opacity:var(--tracking-opacity,1)}.target.destroyed{opacity:0}
 .diagnostics{margin-top:12px;border-top:1px solid #9df5a440;padding-top:10px}
 .diagnostics summary{font-size:11px;cursor:pointer}.diagnostics pre{white-space:pre-wrap;font:10px/1.7 HUD,monospace;margin:10px 0}.diagnostics p{font:10px/1.6 Arial,sans-serif;color:#a8b9ad}
+
+.language-select{max-width:180px;min-height:38px;padding:6px;border:1px solid #8bd5fc60;background:#092131;color:#d5efff;font:12px Arial,sans-serif;border-radius:2px}
+.title-language{position:absolute;top:max(20px,env(safe-area-inset-top));right:5%}.brief-heading{gap:10px;flex-wrap:wrap}.brief-heading>span{margin-right:auto}.audio-note{font:11px/1.6 Arial,sans-serif;color:#b3d4e9;margin:9px 0}.settings-panel .language-select{max-width:190px}
+.audio-toggle{position:absolute;right:max(4.5%,env(safe-area-inset-right));top:max(32px,calc(env(safe-area-inset-top) + 20px));min-height:38px;max-width:145px;padding:5px 9px;border:1px solid #9df5a450;border-radius:2px;background:#0d1a13b0;color:#c1efc5;font:10px/1.4 Arial,sans-serif;z-index:7}
+#radio-text{white-space:pre-line}.radio p{overflow-wrap:anywhere}
+@media(orientation:portrait){.audio-toggle{top:60px;max-width:165px}.prototype-label{display:none}.brief-heading .icon-button{font-size:11px}.brief-heading .language-select{max-width:145px}.settings-panel .language-select{max-width:170px}}
+@media(orientation:landscape) and (max-height:500px){.audio-toggle{top:40px;font-size:9px;max-width:128px}.audio-note{font-size:9px;margin:5px 0}.brief-heading{gap:7px}.brief-heading .icon-button{font-size:10px;padding:5px 8px}.language-select{min-height:32px;max-width:155px}.brief-copy .privacy{line-height:1.5}}

@@ -1,8 +1,10 @@
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=9';
+import {subtitles} from './subtitles.mjs?v=9';
 import {setupRecognition,sourcePoint} from './recognition.mjs?v=8';
-import {createAudio} from './audio.mjs?v=7';
-import {setupOrientation} from './orientation.mjs?v=7';
+import {createAudio} from './audio.mjs?v=9';
+import {setupOrientation} from './orientation.mjs?v=9';
 import {Mission} from './engine.mjs?v=4';
-import {setupLocalVideo} from './local-video.mjs?v=5';
+import {setupLocalVideo} from './local-video.mjs?v=9';
 import {createEffects} from './effects.mjs?v=4';
 const $ = id => document.getElementById(id);
 const game = new Mission();
@@ -12,7 +14,20 @@ const shotTimers = new Set();
 let active = false, stream = null, cameraPending = false, cameraGeneration = 0;
 let orientationController,recognitionController;
 let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo',lockAnnounced=false,lastDiagnosticsPaint=-Infinity;
-const audio=createAudio();
+let audioState='off',radioKey='目标已确认。准备好就开火。',radioVoice=null,feedbackTitle='',feedbackKey='',cameraErrorKey='';
+const audio=createAudio({onState:state=>{audioState=state;renderAudio();}});
+function renderAudio() {
+  const label=t({off:'声音关闭 · 点此开启',loading:'加载声音中…',ready:'关闭声音',error:'重试声音',blocked:'重试声音'}[audioState]);
+  const detail=t({off:'声音已关闭，可点击开启。',loading:'声音加载中，请稍候。',ready:'声音已就绪。',error:'音频加载失败，请点击重试。',blocked:'浏览器暂停了声音，请点击继续。'}[audioState]);
+  for(const id of ['sound','mission-sound','mission-audio-toggle']){$(id).textContent=label;$(id).setAttribute('aria-pressed',String(!muted));}
+  $('brief-audio-status').textContent=$('mission-audio-status').textContent=detail;
+}
+function renderRadio() {
+  const ids=radioVoice==='sandwich'?['v030_5010','v030_5012']:['v030_0028'];
+  $('radio-text').textContent=radioVoice?ids.map(id=>subtitles[getLanguage()][id]).join('\n'):t(radioKey);
+}
+function say(key){radioVoice=null;radioKey=key;renderRadio();}
+function sayVoice(kind){radioVoice=kind;renderRadio();}
 function getSource(){return stream?{type:'camera',video:$('camera')}:localVideo.hasSource()?{type:'video',video:$('local-video')}:{type:'demo',video:null};}
 function applyRecognition(observation) {
   const {type,video,result,state,failed,displayPose,displayOpacity,displayStatus}=observation;
@@ -24,8 +39,8 @@ function applyRecognition(observation) {
   if(simulated) {
     targetVisible=true;
     $('target').style.left='';$('target').style.top='';$('target').style.setProperty('--tracking-opacity','1');
-    $('recognition-status').textContent='演示模式 · 手动切换核心状态';
-    $('tracking-hint').textContent='演示模式 · 可在测试设置切换遮挡';
+    $('recognition-status').textContent=t('演示模式 · 手动切换核心状态');
+    $('tracking-hint').textContent=t('演示模式 · 可在测试设置切换遮挡');
     render();return;
   }
   const center=displayPose?.center;
@@ -38,8 +53,8 @@ function applyRecognition(observation) {
   }
   game.tracked=targetVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
   const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):'寻找汉堡 · 请保持完整入镜';
-  $('recognition-status').textContent='桌面实验识别 · '+message;
-  $('tracking-hint').textContent=game.destroyed?'核心已击破 · 重置后再试':message;
+  $('recognition-status').textContent=t('桌面实验识别 · {message}',{message:t(message)});
+  $('tracking-hint').textContent=t(game.destroyed?'核心已击破 · 重置后再试':message);
   render();
   // Selection persists through geometry uncertainty; only a current location
   // may announce the single target, once per sortie. Held positions stay silent.
@@ -54,9 +69,9 @@ function renderCooldown() {
   }
   $('fire').disabled = !game.canFire(now);
   const ready=game.readyAt.filter(time => time<=now).length;
-  const status=`导弹就绪 ${ready}/2`;
+  const status=t('导弹就绪 {ready}/2',{ready});
   if ($('reload-status').textContent!==status) $('reload-status').textContent=status;
-  $('fire').lastElementChild.textContent = game.destroyed ? '目标已击破' : !game.tracked ? '等待确认目标' : !game.ammo ? '弹药耗尽' : !ready ? '装填中' : '发射导弹';
+  $('fire').lastElementChild.textContent=t(game.destroyed?'目标已击破':!game.tracked?'等待确认目标':!game.ammo?'弹药耗尽':!ready?'装填中':'发射导弹');
 }
 function render() {
   $('ammo').textContent=String(game.ammo).padStart(2,'0');
@@ -68,13 +83,14 @@ function render() {
   $('blocked').setAttribute('aria-pressed',String(!game.exposed));
   $('exposed').disabled=$('blocked').disabled=game.destroyed;
   $('tracking-toggle').setAttribute('aria-pressed',String(game.tracked));
-  $('tracking-toggle').textContent=game.tracked?'目标可见':'目标丢失';
-  $('reset').textContent=game.destroyed?'↻ 下一架次':'↻ 重置任务';
+  $('tracking-toggle').textContent=t(game.tracked?'目标可见':'目标丢失');
+  $('reset').textContent=t(game.destroyed?'↻ 下一架次':'↻ 重置任务');
   renderCooldown();
 }
 function feedback(title='', detail='') {
+  feedbackTitle=title;feedbackKey=detail;
   $('feedback').firstElementChild.textContent=title;
-  $('feedback').lastElementChild.textContent=detail;
+  $('feedback').lastElementChild.textContent=t(detail);
   $('feedback').classList.toggle('missed',title==='MISSED');
 }
 function announceLock() {
@@ -86,12 +102,12 @@ function renderDiagnostics(d) {
   lastDiagnosticsPaint=performance.now();
   const ms=value=>value===null?'—':Math.round(value)+' ms';
   $('ar-diagnostics').textContent=[
-    `画面通知：${d.frameClock==='video-frame-callback'?'逐帧回调':'时间轮询（估计）'}`,
-    `新帧间隔 ${ms(d.frameIntervalMs)} · 距上帧 ${ms(d.frameAgeMs)}`,
-    `像素读取 ${ms(d.readbackMs)} · 识别计算 ${ms(d.processingMs)}`,
-    `计算往返 ${ms(d.turnaroundMs)} · 结果年龄 ${ms(d.resultAgeMs)}`,
-    `画面超时 ${d.frameStaleEvents} 次 · 结果过期 ${d.resultExpiredEvents} 次`,
-    d.resultExpired?'当前结果已过期，不可攻击':d.frameStale?'当前画面已超时，不可攻击':'',
+    t('画面通知：{mode}',{mode:t(d.frameClock==='video-frame-callback'?'逐帧回调':'时间轮询（估计）')}),
+    t('新帧间隔 {interval} · 距上帧 {age}',{interval:ms(d.frameIntervalMs),age:ms(d.frameAgeMs)}),
+    t('像素读取 {read} · 识别计算 {compute}',{read:ms(d.readbackMs),compute:ms(d.processingMs)}),
+    t('计算往返 {roundtrip} · 结果年龄 {age}',{roundtrip:ms(d.turnaroundMs),age:ms(d.resultAgeMs)}),
+    t('画面超时 {frames} 次 · 结果过期 {results} 次',{frames:d.frameStaleEvents,results:d.resultExpiredEvents}),
+    t(d.resultExpired?'当前结果已过期，不可攻击':d.frameStale?'当前画面已超时，不可攻击':''),
   ].filter(Boolean).join('\n');
 }
 function enter() {
@@ -102,10 +118,16 @@ function enter() {
   $('app').classList.replace('briefing','playing');
   render(); if(getSource().type==='demo'&&game.tracked)announceLock();
 }
-function cameraMessage(message){$('camera-error').textContent=message;if(active)$('radio-text').textContent=message;}
-function updateCamera(){const live=!!stream;$('app').classList.toggle('camera-live',live);$('camera-status').textContent=live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景';$('camera-toggle').textContent=cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头';$('start').disabled=cameraPending;$('start').firstChild.textContent=cameraPending?'等待摄像头授权…':'开始任务 ';orientationController?.refreshSource();}
+function cameraMessage(key){cameraErrorKey=key;$('camera-error').textContent=t(key);if(active)say(key);}
+function updateCamera(){
+  const live=!!stream;$('app').classList.toggle('camera-live',live);
+  $('camera-status').textContent=t(live?'● 摄像头已开启':localVideo.hasSource()?'● 本地视频':'● 演示背景');
+  $('camera-toggle').textContent=t(cameraPending?'取消开启':live?'关闭摄像头':'开启摄像头');
+  $('start').disabled=cameraPending;$('start').firstChild.textContent=t(cameraPending?'等待摄像头授权…':'开始任务')+' ';
+  orientationController?.refreshSource();
+}
 function stopCamera(){cameraGeneration++;cameraPending=false;const old=stream;stream=null;if(old)old.getTracks().forEach(t=>t.stop());$('camera').srcObject=null;updateCamera();}
-async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}localVideo.clear();stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();updateCamera();orientationController.offer();$('radio-text').textContent='将汉堡放在桌上，缓慢改变观察角度。';}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
+async function startCamera(){if(cameraPending){stopCamera();return;}if(!window.isSecureContext){cameraMessage('摄像头需要 HTTPS 安全网址；现在可以先体验演示。');return;}if(!navigator.mediaDevices?.getUserMedia){cameraMessage('当前浏览器无法开启摄像头，请使用手机系统浏览器，或先体验演示。');return;}cameraPending=true;const generation=++cameraGeneration;updateCamera();cameraMessage('请在浏览器提示中允许摄像头；也可以先进入演示。');try{const media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});if(generation!==cameraGeneration){media.getTracks().forEach(t=>t.stop());return;}localVideo.clear();stream=media;$('camera').srcObject=media;await $('camera').play();if(generation!==cameraGeneration)return;media.getVideoTracks()[0].addEventListener('ended',()=>{if(stream===media){stopCamera();cameraMessage('摄像头已中断，可点击“开启摄像头”重试。');}});cameraMessage('');enter();updateCamera();orientationController.offer();say('将汉堡放在桌上，缓慢改变观察角度。');}catch(error){if(generation!==cameraGeneration)return;stopCamera();const messages={NotAllowedError:'摄像头权限未开启。请在浏览器的网站权限中允许摄像头，再点击重试；也可以先体验演示。',NotFoundError:'没有找到可用摄像头，可以先体验演示。',NotReadableError:'摄像头暂时无法使用，请关闭其他占用摄像头的应用后重试。'};cameraMessage(messages[error.name]||'摄像头未能启动，请使用手机系统浏览器重试，或先体验演示。');}finally{if(generation===cameraGeneration){cameraPending=false;updateCamera();}}}
 
 
 const localVideo=setupLocalVideo({
@@ -132,7 +154,7 @@ function fire() {
   if (!shot) return;
   clearTimeout(feedbackTimer);
   feedback();
-  $('radio-text').textContent='导弹发射。';
+  say('导弹发射。');
   audio.effect('launch');
   render(); effects.launch(shot);
   const timer=setTimeout(() => {
@@ -148,11 +170,11 @@ function fire() {
       clearTimeout(feedbackTimer);
       feedback('DESTROYED','核心击破 · +400');
       const voice=voiceCount++%2===0?'sandwich':'burger';
-      $('radio-text').textContent=voice==='sandwich'?'办得到的人，学 Trigger 去做三明治。':'（Longcaster：汉堡通信）';
+      sayVoice(voice);
       audio.feedback(voice);
     } else {
       feedback('MISSED',game.ammo?'未确认命中 · 未得分':'弹药已耗尽 · 请重置任务');
-      $('radio-text').textContent=getSource().type==='demo'?'面包挡住了核心。切换“核心露出”再试一次。':'请保持目标在画面内，找到核心露出的角度。';
+      say(getSource().type==='demo'?'面包挡住了核心。切换“核心露出”再试一次。':'请保持目标在画面内，找到核心露出的角度。');
       feedbackTimer=setTimeout(() => feedback(),1800);
     }
     render();
@@ -164,7 +186,7 @@ function reset() {
   shotTimers.clear(); clearTimeout(feedbackTimer); effects.clear();
   game.reset();lockAnnounced=false; audio.stop(); recognitionController?.reset(); feedback();
   if(getSource().type!=='demo'){game.tracked=false;game.exposed=false;targetVisible=false;}
-  $('radio-text').textContent='目标已确认。准备好就开火。';
+  say('目标已确认。准备好就开火。');
   render(); if(getSource().type==='demo'&&game.tracked)announceLock();
 }
 $('show-brief').addEventListener('click', () => {
@@ -178,24 +200,20 @@ $('reset').addEventListener('click',reset);
 $('tracking-toggle').addEventListener('click', () => {
   if(getSource().type!=='demo')return;
   game.tracked=!game.tracked;
-  $('radio-text').textContent=game.tracked?'目标重新确认。':'目标丢失。将目标移回视野。';
+  say(game.tracked?'目标重新确认。':'目标丢失。将目标移回视野。');
   render(); if(game.tracked)announceLock();
 });
 for (const [id,value] of [['exposed',true],['blocked',false]]) {
   $(id).addEventListener('click', () => {
     if (getSource().type!=='demo'||!game.setExposure(value)) return;
     clearTimeout(feedbackTimer); feedback();
-    $('radio-text').textContent=value?'核心露出，允许攻击。':'核心被面包遮挡，攻击不会得分。';
+    say(value?'核心露出，允许攻击。':'核心被面包遮挡，攻击不会得分。');
     render();
   });
 }
-for (const id of ['sound','mission-sound']) $(id).addEventListener('click', () => {
-  muted=!muted;audio.setEnabled(!muted);
-  for (const buttonId of ['sound','mission-sound']) {
-    const button=$(buttonId);
-    button.textContent=(buttonId==='sound'?'音效 ':'原作音频 ')+(muted?'OFF':'ON');
-    button.setAttribute('aria-pressed',String(!muted));
-  }
+for (const id of ['sound','mission-sound','mission-audio-toggle']) $(id).addEventListener('click',()=>{
+  muted=muted||audioState==='error'||audioState==='blocked'?false:true;
+  audio.setEnabled(!muted);renderAudio();
 });
 $('export-diagnostics').addEventListener('click',()=>{
   const data=recognitionController.diagnostics();
@@ -207,11 +225,11 @@ $('fullscreen').addEventListener('click',async () => {
   try {
     if(document.fullscreenElement) await document.exitFullscreen();
     else if(document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
-    else $('radio-text').textContent='此浏览器不支持网页全屏，横过手机即可体验。';
-  } catch { $('radio-text').textContent='暂时无法全屏，横过手机即可体验。'; }
+    else say('此浏览器不支持网页全屏，横过手机即可体验。');
+  } catch { say('暂时无法全屏，横过手机即可体验。'); }
 });
 document.addEventListener('fullscreenchange', () => {
-  $('fullscreen').textContent=document.fullscreenElement?'退出全屏':'全屏';
+  $('fullscreen').textContent=t(document.fullscreenElement?'退出全屏':'全屏');
 });
 document.addEventListener('keydown',e => {
   if(e.code==='Space' && active && !['BUTTON','INPUT','A','SUMMARY','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) {
@@ -220,6 +238,14 @@ document.addEventListener('keydown',e => {
 });
 orientationController=setupOrientation({button:$('orientation-toggle'),status:$('orientation-status'),rollGroup:$('attitude-roll'),pitchGroup:$('attitude-pitch'),reduced,getSource,prompt:$('orientation-prompt'),allow:$('orientation-allow'),skip:$('orientation-skip')});
 recognitionController=setupRecognition({getSource,onResult:applyRecognition});
+setupLanguages(()=>{
+  render();renderRadio();renderAudio();feedback(feedbackTitle,feedbackKey);updateCamera();
+  $('camera-error').textContent=t(cameraErrorKey);
+  $('fullscreen').textContent=t(document.fullscreenElement?'退出全屏':'全屏');
+  orientationController.refreshLabels();localVideo.refreshLabels();
+  lastDiagnosticsPaint=-Infinity;applyRecognition(recognitionController.current());
+});
+renderRadio();renderAudio();
 // Only two cooldown indicators need updating, even when no camera is available.
 setInterval(() => {if(active && !document.hidden) renderCooldown();},50);
 window.addEventListener('pagehide', () => {
