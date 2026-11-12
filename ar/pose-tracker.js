@@ -39,6 +39,12 @@
  * 108 lost of 507 frames at 10 Hz. These are development output counts, not
  * accuracy. Multiple burgers and distant/blurred views still lose or swap
  * candidates. Screen recordings cannot validate raw phone camera throughput.
+ * 2026-11-12: rank close current-frame fits with a bounded stable-pose prior.
+ * No extra attack dwell and no changes to geometry or the 2 mm / 15% rule.
+ * New screen-recording 6-18s replay: 22 -> 16 state switches, exposed outputs
+ * 90 -> 95 of 120; tracking found remains 111. This is not accuracy, and
+ * false blocks/pose jumps remain. Real side -> top photo transition revokes
+ * exposed immediately. Diagnostic candidate scores are not probabilities.
  */
 (() => {
   const modelAPI=globalThis.BurgerModel,geometry=modelAPI.presets.candidate;
@@ -440,6 +446,14 @@
       // holding them. Otherwise the third frame could still suddenly halve.
       const guard=this.lock??this.last;
       const supportedFits=visuallySupported.filter(p=>!guard||continuity(p,guard.raw,timestampMs-guard.time).allowed);
+      // Fresh image fits are computed independently above. Only resolve close
+      // alternatives against the last stable pose; never rescue a failed fit.
+      // Costs are bounded, so clearly better current evidence can change view.
+      const stableReference=frame.table?this.lock?.raw:null;
+      const selectionMerit=p=>p.e.score-(stableReference?
+        .035*Math.min(2,Math.abs(p.t-stableReference.t))+
+        .01*Math.min(2,Math.abs(wrap(p.roll-stableReference.roll))/15):0);
+      supportedFits.sort((a,b)=>selectionMerit(b)-selectionMerit(a));
       const supported=supportedFits.length>0,best=supportedFits[0]??visuallySupported[0]??fitted[0];
       if(!supported) {
         const reason=visuallySupported.length?'continuity-rejected':best?'weak-model-fit':'no-supported-target';
@@ -448,7 +462,7 @@
       }
       // Near the symmetry axis, in-plane rotation is unobservable and irrelevant.
       const competing=supportedFits.find(p=>p!==best&&(Math.abs(p.t-best.t)>=2||(Math.min(Math.cos(templates[p.t].elevation*DEG),Math.cos(templates[best.t].elevation*DEG))>.25&&Math.abs(wrap(p.roll-best.roll))>20)||Math.abs(Math.log(p.scale/best.scale))>.2)&&Math.hypot(p.x-best.x,p.y-best.y)<best.scale*22);
-      const ambiguous=!!competing&&best.e.score-competing.e.score<.045;
+      const ambiguous=!!competing&&selectionMerit(best)-selectionMerit(competing)<.045;
       const distant=supportedFits.find(p=>p!==best&&Math.hypot(p.x-best.x,p.y-best.y)>best.scale*22&&best.e.score-p.e.score<.04);
       if(distant){this.reset();return empty(timestampMs,'multiple-targets');}
       const continuous=reference&&continuity(best,reference,dtMs).allowed;
@@ -480,7 +494,8 @@
       // A cap-only observation must not manufacture certainty by discarding
       // shallower contour fits solely because their filling was not detected.
       const capOnly=frame.table&&!(best.e.greens>=2&&best.e.darks>=2);
-      const plausibleFits=(capOnly?fitted:supportedFits).filter(p=>best.e.score-p.e.score<.045);
+      const plausibleFits=(capOnly?fitted:supportedFits).filter(p=>capOnly?
+        best.e.score-p.e.score<.045:selectionMerit(best)-selectionMerit(p)<.045);
       const possibleAngles=frame.table?plausibleFits.map(p=>templates[p.t].elevation):[];
       const angleRange=possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null;
       const regionAPI=globalThis.BurgerAttackRegion;
@@ -500,6 +515,9 @@
         // Geometric self-occlusion only. Fingers are absent from the mesh.
         modelCenterSurface:ambiguous&&templates[competing.t].centerMaterial!==templates[best.t].centerMaterial?'unknown':templates[best.t].centerMaterial,
         debug:{fit:best.e,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
+          candidates:visuallySupported.map(p=>({elevationDegrees:templates[p.t].elevation,score:p.e.score,
+            selectionScore:selectionMerit(p),continuous:supportedFits.includes(p),
+            center:{x:p.x/frame.w,y:p.y/frame.h},scalePerSourceWidth:p.scale/frame.w})),
           capOnly,sesame:frame.cap?.sesame??null,
           streak:this.streak,holdReady:!!this.lock,placementUncertain,continuity:continuity(best,reference,dtMs)}};
     }

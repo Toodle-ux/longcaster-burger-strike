@@ -1,5 +1,6 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
+export const RUNTIME_RELEASE='v10';
 export function permission(result,age) {
   if(!result||age<0||age>MAX_EVIDENCE_AGE||result.tracking!=='found'||!result.targetFound||
     !result.coreCenter||!result.attackRegion||result.evidenceTimestampMs!==result.timestampMs)return 'unknown';
@@ -32,6 +33,7 @@ export function setupRecognition({getSource,onResult}) {
   let lastMediaTime=-1,lastFrameAt=-Infinity,frameIntervalMs=null,mediaIntervalMs=null,presentedFramesDelta=null,lastPresented=null;
   let processingMs=null,readbackMs=null,turnaroundMs=null,frameStaleEvents=0,resultExpiredEvents=0,wasFrameStale=false,wasExpired=false;
   const records=[];
+  let lastDisplayRecord=-Infinity;
   const finite=value=>Number.isFinite(value)?Math.round(value*10)/10:null;
   function record(event,extra={}) {
     records.push({event,timeMs:finite(performance.now()),source:type,mediaTime:finite(video?.currentTime),
@@ -40,7 +42,7 @@ export function setupRecognition({getSource,onResult}) {
     if(records.length>600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/worker.js?v=8',import.meta.url));
+    worker=new Worker(new URL('./ar/worker.js?v=10',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;
@@ -48,12 +50,16 @@ export function setupRecognition({getSource,onResult}) {
       result=data.result;capturedAt=job.capturedAt;readbackMs=job.readbackMs;
       processingMs=data.processingMs;turnaroundMs=performance.now()-capturedAt;
       record('result',{tracking:result.tracking,geometry:result.modelAttackability,reason:result.reason,
-        evidenceAgeMs:finite(observation(result,turnaroundMs,0).evidenceAgeMs),displayMotion:result.displayMotion});
+        evidenceAgeMs:finite(observation(result,turnaroundMs,0).evidenceAgeMs),displayMotion:result.displayMotion,
+        coreCenter:result.coreCenter,displayPoseCenter:result.displayPose?.center??null,
+        pose:result.pose,elevationRangeDegrees:result.elevationRangeDegrees,
+        debug:{candidates:result.debug?.candidates??[]}});
       publish();
     };
     worker.onerror=()=>{failed=true;pending=null;result=null;record('worker-error');publish();};
   } catch {failed=true;}
   function invalidate() {
+    lastDisplayRecord=-Infinity;
     generation++;result=null;capturedAt=-Infinity;analyzedSerial=-1;lastStamp=-Infinity;
     lastFrameAt=-Infinity;lastMediaTime=-1;lastPresented=null;wasFrameStale=wasExpired=false;
   }
@@ -138,7 +144,12 @@ export function setupRecognition({getSource,onResult}) {
   document.addEventListener('visibilitychange',invalidate);
   tick();
   return {current,reset:invalidate,
-    diagnostics(){return {schema:'burger-runtime/v8',release:'v8',limits:{freshMs:MAX_EVIDENCE_AGE,displayHoldMs:DISPLAY_HOLD_MS},
+    recordDisplay(center,now,viewport){
+      if(disposed||document.hidden||type==='demo'||now-lastDisplayRecord<200)return;
+      lastDisplayRecord=now;record('display',{displayCenterCss:center,viewport});
+    },
+    diagnostics(){return {schema:`burger-runtime/${RUNTIME_RELEASE}`,release:RUNTIME_RELEASE,limits:{freshMs:MAX_EVIDENCE_AGE,displayHoldMs:DISPLAY_HOLD_MS},
+      coordinates:{coreCenter:'normalized source',displayPoseCenter:'normalized source',displayCenterCss:'CSS pixels in app viewport'},
       source:type,dimensions:video?{width:video.videoWidth,height:video.videoHeight}:null,
       snapshot:current().diagnostics,records:[...records]};},
     stop(){disposed=true;invalidate();stopFrames();clearTimeout(timer);},

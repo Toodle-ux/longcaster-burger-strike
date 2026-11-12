@@ -1,4 +1,4 @@
-importScripts('./coarse-model.js','./attack-region.js','./pose-tracker.js?v=8');
+importScripts('./coarse-model.js','./attack-region.js','./pose-tracker.js?v=10');
 const tracker=new BurgerPose.Tracker({mode:'table'});
 let generation=-1;
 self.onmessage=({data})=>{

@@ -1,6 +1,7 @@
 import {t,getLanguage,setupLanguages} from './i18n.mjs?v=9';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint} from './recognition.mjs?v=8';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=10';
+import './ar/core-display.js?v=10';
 import {createAudio} from './audio.mjs?v=9';
 import {setupOrientation} from './orientation.mjs?v=9';
 import {Mission} from './engine.mjs?v=4';
@@ -13,6 +14,30 @@ const effects = createEffects($('effects'), $('target'), reduced);
 const shotTimers = new Set();
 let active = false, stream = null, cameraPending = false, cameraGeneration = 0;
 let orientationController,recognitionController;
+const coreDisplay=new globalThis.BurgerCoreDisplay();
+let displayFrame=null,displayViewport='',displayVideo=null;
+function projectedCore({displayPose,video,type}) {
+  if(!displayPose?.center||!video?.videoWidth)return null;
+  const app=$('app');
+  const point=sourcePoint(displayPose.center,video.videoWidth,video.videoHeight,app.clientWidth,app.clientHeight,type==='camera'?'cover':'contain');
+  return point.x>=0&&point.x<=app.clientWidth&&point.y>=0&&point.y<=app.clientHeight?point:null;
+}
+function paintCore(now) {
+  const view=recognitionController.current(),app=$('app');
+  const viewport=[view.type,app.clientWidth,app.clientHeight,view.video?.videoWidth,view.video?.videoHeight,screen.orientation?.angle].join(':');
+  if(viewport!==displayViewport||view.video!==displayVideo){coreDisplay.reset();displayViewport=viewport;displayVideo=view.video;}
+  // Recheck evidence every frame. Interpolation never grants attacks or extends a hold.
+  const point=coreDisplay.step(projectedCore(view),now);
+  if(view.type!=='demo') {
+    $('target').classList.toggle('lost',!point);
+    $('target').style.setProperty('--tracking-opacity',String(view.displayOpacity));
+    if(point){$('target').style.left=point.x+'px';$('target').style.top=point.y+'px';}
+    recognitionController.recordDisplay(point,now,{width:app.clientWidth,height:app.clientHeight});
+  }
+  displayFrame=requestAnimationFrame(paintCore);
+}
+function stopDisplay(){cancelAnimationFrame(displayFrame);displayFrame=null;coreDisplay.reset();}
+function startDisplay(){if(displayFrame===null)displayFrame=requestAnimationFrame(paintCore);}
 let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo',lockAnnounced=false,lastDiagnosticsPaint=-Infinity;
 let audioState='off',radioKey='目标已确认。准备好就开火。',radioVoice=null,feedbackTitle='',feedbackKey='',cameraErrorKey='';
 const audio=createAudio({onState:state=>{audioState=state;renderAudio();}});
@@ -43,15 +68,10 @@ function applyRecognition(observation) {
     $('tracking-hint').textContent=t('演示模式 · 可在测试设置切换遮挡');
     render();return;
   }
-  const center=displayPose?.center;
   $('target').style.setProperty('--tracking-opacity',String(displayOpacity));
-  targetVisible=!!center;
-  if(center&&video?.videoWidth) {
-    const point=sourcePoint(center,video.videoWidth,video.videoHeight,$('app').clientWidth,$('app').clientHeight,type==='camera'?'cover':'contain');
-    targetVisible=point.x>=0&&point.x<=$('app').clientWidth&&point.y>=0&&point.y<=$('app').clientHeight;
-    $('target').style.left=point.x+'px';$('target').style.top=point.y+'px';
-  }
-  game.tracked=targetVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
+  targetVisible=!!projectedCore(observation);
+  const measuredVisible=!!projectedCore({...observation,displayPose:result?.coreCenter?{center:result.coreCenter}:null});
+  game.tracked=measuredVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
   const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):'寻找汉堡 · 请保持完整入镜';
   $('recognition-status').textContent=t('桌面实验识别 · {message}',{message:t(message)});
   $('tracking-hint').textContent=t(game.destroyed?'核心已击破 · 重置后再试':message);
@@ -182,6 +202,7 @@ function fire() {
   shotTimers.add(timer);
 }
 function reset() {
+  coreDisplay.reset();
   for (const timer of shotTimers) clearTimeout(timer);
   shotTimers.clear(); clearTimeout(feedbackTimer); effects.clear();
   game.reset();lockAnnounced=false; audio.stop(); recognitionController?.reset(); feedback();
@@ -218,7 +239,7 @@ for (const id of ['sound','mission-sound','mission-audio-toggle']) $(id).addEven
 $('export-diagnostics').addEventListener('click',()=>{
   const data=recognitionController.diagnostics();
   const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
-  const link=document.createElement('a');link.href=url;link.download='burger-runtime-v8.json';
+  const link=document.createElement('a');link.href=url;link.download=`burger-runtime-${RUNTIME_RELEASE}.json`;
   link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
 $('fullscreen').addEventListener('click',async () => {
@@ -238,6 +259,7 @@ document.addEventListener('keydown',e => {
 });
 orientationController=setupOrientation({button:$('orientation-toggle'),status:$('orientation-status'),rollGroup:$('attitude-roll'),pitchGroup:$('attitude-pitch'),reduced,getSource,prompt:$('orientation-prompt'),allow:$('orientation-allow'),skip:$('orientation-skip')});
 recognitionController=setupRecognition({getSource,onResult:applyRecognition});
+startDisplay();
 setupLanguages(()=>{
   render();renderRadio();renderAudio();feedback(feedbackTitle,feedbackKey);updateCamera();
   $('camera-error').textContent=t(cameraErrorKey);
@@ -249,7 +271,8 @@ renderRadio();renderAudio();
 // Only two cooldown indicators need updating, even when no camera is available.
 setInterval(() => {if(active && !document.hidden) renderCooldown();},50);
 window.addEventListener('pagehide', () => {
+  stopDisplay();
   orientationController.stop(); recognitionController.stop(); audio.stop(); stopCamera(); localVideo.clear(); reset();
 });
 
-window.addEventListener('pageshow', () => {orientationController.resume();recognitionController.resume();});
+window.addEventListener('pageshow', () => {orientationController.resume();recognitionController.resume();startDisplay();});
