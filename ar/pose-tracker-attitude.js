@@ -189,12 +189,13 @@
     return out.sort((a,b)=>b.count-a.count);
   }
   let templates;
-  function buildTemplates() {
+  const templateOf=p=>p.template??templates[p.t];
+  function buildTemplates(elevations=Array.from({length:17},(_,i)=>-70+i*10)) {
     // Rasterize nearest surfaces with a tiny software z-buffer. Labels and
     // silhouettes come from the SAME mesh rendered by the review/overlay page.
     const mesh=modelAPI.mesh(geometry),N=65,step=.55;
     const output=[];
-    for(let elevation=-70;elevation<=90;elevation+=10) {
+    for(const elevation of elevations) {
       const pose={x:0,y:0,scale:1,elevation,roll:0},points=mesh.vertices.map(p=>modelAPI.project(p,pose));
       const depth=new Float32Array(N*N).fill(-Infinity),material=new Uint8Array(N*N),worldY=new Float32Array(N*N);
       for(const face of mesh.faces)for(const indices of [[0,1,2],[0,2,3]]) {
@@ -238,7 +239,7 @@
   // the filling, not additional geometry or a learned material classifier.
   const fillingBands=[[0,.15,1,.25,.3,.1],[0,.15,.3,.15,1,.1],[0,1,.25,.05,.25,.1]];
   function evaluate(frame,p) {
-    const template=templates[p.t],c=Math.cos(p.roll*DEG),s=Math.sin(p.roll*DEG),sum=[0,0,0,0],count=[0,0,0,0];
+    const template=templateOf(p),c=Math.cos(p.roll*DEG),s=Math.sin(p.roll*DEG),sum=[0,0,0,0],count=[0,0,0,0];
     let greens=0,darks=0,buns=0;
     for(const q of template.samples) {
       const x=Math.round(p.x+p.scale*(q.x*c+q.y*s)),y=Math.round(p.y+p.scale*(-q.x*s+q.y*c));
@@ -269,11 +270,12 @@
     const diameter=p.scale*geometry.fillingDiameter;
     for(const fraction of [1,.5])for(let pass=0;pass<2;pass++) {
       for(const [key,step] of [['x',Math.max(1,diameter*.07)*fraction],['y',Math.max(1,diameter*.07)*fraction],['scale',p.scale*.07*fraction],['roll',6*fraction],['t',1]]) {
+        if(frame.attitude?.used&&(key==='roll'||key==='t'))continue;
         let best=p,bestEvidence=e,bestScore=score;
         for(const sign of [-1,1]) {
           const q={...p,[key]:p[key]+sign*step};q.roll=wrap(q.roll);
           if(q.t<0||q.t>=templates.length||q.scale<.55||q.scale>frame.w/28)continue;
-          if(frame.table&&(q.t<7||Math.abs(q.roll)>45))continue;
+          if(frame.table&&!frame.attitude?.used&&(q.t<7||Math.abs(q.roll)>45))continue;
           const qe=evaluate(frame,q),qs=merit(q,qe,previous,dtMs);
           if(qs>bestScore){best=q;bestEvidence=qe;bestScore=qs;}
         }
@@ -363,7 +365,7 @@
   }
   class Tracker {
     constructor({mode='handheld'}={}){templates??=buildTemplates();this.mode=mode;this.reset();}
-    reset(){this.last=null;this.lock=null;this.previous=null;this.lastTime=-Infinity;this.selection=null;this.streak=0;this.stableSince=null;}
+    reset(){this.last=null;this.lock=null;this.previous=null;this.lastTime=-Infinity;this.selection=null;this.streak=0;this.stableSince=null;this.frameAttitude=null;}
     select(x,y){this.reset();this.selection={x,y};}
     missing(timestampMs,reason='short-gap-display-only',{frame}={}) {
       this.streak=0;this.stableSince=null;
@@ -391,10 +393,11 @@
       return out;
     }
     update(input,timestampMs,options={}) {
+      this.frameAttitude=null;
       const out=this.fit(input,timestampMs,options);
       const hint=this.mode==='table'?options.tableAttitude:null;
-      out.attitudeAssist={hint:hint??null,...globalThis.BurgerTableAttitude?.candidate(hint,
-        out.pose?.elevationDegrees,out.coreCenter,input.width,input.height,timestampMs)};
+      out.attitudeAssist={hint:hint??null,...(this.frameAttitude??globalThis.BurgerTableAttitude?.constraint(hint,
+        null,input.width,input.height,timestampMs))};
       return out;
     }
     fit(input,timestampMs,{temporal=true,tableAttitude=null}={}) {
@@ -409,13 +412,29 @@
       frame.cap=frame.table?capObservation(input,frame,this.selection):null;
       if(frame.table&&!frame.cap)return this.missing(timestampMs,'no-complete-cap',{frame});
       const contour=frame.cap?.points.map(p=>({x:p.x/frame.w,y:p.y/frame.h}))??null;
-      const hypotheses=frame.table?[]:seeds(frame,this.selection),reference=this.last?.raw;
+      const hypotheses=frame.table?[]:seeds(frame,this.selection);
+      let reference=this.last?.raw;
       if(frame.table){
         const observed=bounds(frame.cap.points);
-        for(let t=7;t<templates.length;t++)for(const roll of [-30,-15,0,15,30]){
-          const c=Math.cos(roll*DEG),s=Math.sin(roll*DEG),box=bounds(templates[t].upperHull.map(p=>({x:p.x*c+p.y*s,y:-p.x*s+p.y*c})));
+        frame.attitude=globalThis.BurgerTableAttitude?.constraint(tableAttitude,
+          {x:(observed.left+observed.right)/2/frame.w,y:(observed.top+observed.bottom)/2/frame.h},frame.w,frame.h,timestampMs);
+        this.frameAttitude=frame.attitude;
+        const orientations=[];
+        if(frame.attitude?.used){
+          const elevation=frame.attitude.elevationDegrees;
+          // Fit a freshly projected template at the measured angle, not a
+          // visual 10-degree candidate with its drawn rotation overwritten.
+          const template=buildTemplates([elevation])[0];
+          orientations.push({t:Math.round((elevation+70)/10),template,roll:frame.attitude.rollDegrees});
+          if(reference)reference={...reference,...orientations[0]};
+        }else{
+          if(reference?.template)reference={...reference,template:undefined};
+          for(let t=7;t<templates.length;t++)for(const roll of [-30,-15,0,15,30])orientations.push({t,roll});
+        }
+        for(const orientation of orientations){
+          const {roll}=orientation,c=Math.cos(roll*DEG),s=Math.sin(roll*DEG),box=bounds(templateOf(orientation).upperHull.map(p=>({x:p.x*c+p.y*s,y:-p.x*s+p.y*c})));
           const scale=(observed.right-observed.left)/(box.right-box.left);
-          hypotheses.push({t,roll,scale,x:(observed.left+observed.right-scale*(box.left+box.right))/2,y:(observed.top+observed.bottom-scale*(box.top+box.bottom))/2});
+          hypotheses.push({...orientation,scale,x:(observed.left+observed.right-scale*(box.left+box.right))/2,y:(observed.top+observed.bottom-scale*(box.top+box.bottom))/2});
         }
       }
       const dtMs=this.last?timestampMs-this.last.time:0;
@@ -438,14 +457,14 @@
       const isSupported=q=>{
         if(frame.table){
           const layered=q.e.greens>=2&&q.e.darks>=2;
-          const top=frame.cap.sesame.strong&&templates[q.t].elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
+          const top=frame.cap.sesame.strong&&templateOf(q).elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
           return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.upper>.45&&(layered||top);
         }
         const freshTop=hypotheses.some(p=>p.freshTop&&Math.hypot(p.x-q.x,p.y-q.y)<q.scale*8&&Math.abs(Math.log(p.scale/q.scale))<.3);
         // A small upside-down model on one green leaf can score highly. Require
         // both green and dark filling evidence, or fresh sesame-cap evidence.
         const layered=q.e.greens>=3&&q.e.darks>=Math.max(3,q.e.fillSamples*.06)&&q.e.filling>.38;
-        return q.e.score>.59&&q.e.upper>.35&&q.e.buns>=3&&(layered||(freshTop&&templates[q.t].elevation>=60&&q.e.upper>.68));
+        return q.e.score>.59&&q.e.upper>.35&&q.e.buns>=3&&(layered||(freshTop&&templateOf(q).elevation>=60&&q.e.upper>.68));
       };
       const visuallySupported=fitted.filter(isSupported);
       // Tentative observations also have to agree with the preceding frame.
@@ -456,15 +475,10 @@
       // Fresh image fits are computed independently above. Only resolve close
       // alternatives against the last stable pose; never rescue a failed fit.
       // Costs are bounded, so clearly better current evidence can change view.
-      const stableReference=frame.table?this.lock?.raw:null;
-      // Optional tabletop sensor aid only ranks already supported image fits.
-      // It cannot create a target, rescue failed colour/contour evidence, or
-      // turn held evidence into an attack. Missing hints preserve visual-only.
-      const attitudeCost=p=>frame.table?(globalThis.BurgerTableAttitude?.candidate(tableAttitude,
-        templates[p.t].elevation,{x:p.x/frame.w,y:p.y/frame.h},frame.w,frame.h,timestampMs).penalty??0):0;
+      const stableReference=frame.table&&!frame.attitude?.used?this.lock?.raw:null;
       const selectionMerit=p=>p.e.score-(stableReference?
         .035*Math.min(2,Math.abs(p.t-stableReference.t))+
-        .01*Math.min(2,Math.abs(wrap(p.roll-stableReference.roll))/15):0)-attitudeCost(p);
+        .01*Math.min(2,Math.abs(wrap(p.roll-stableReference.roll))/15):0);
       supportedFits.sort((a,b)=>selectionMerit(b)-selectionMerit(a));
       const supported=supportedFits.length>0,best=supportedFits[0]??visuallySupported[0]??fitted[0];
       if(!supported) {
@@ -473,7 +487,7 @@
         out.bunContour=contour;out.debug=best?{fit:best.e,continuity:continuity(best,reference,dtMs)}:null;return out;
       }
       // Near the symmetry axis, in-plane rotation is unobservable and irrelevant.
-      const competing=supportedFits.find(p=>p!==best&&(Math.abs(p.t-best.t)>=2||(Math.min(Math.cos(templates[p.t].elevation*DEG),Math.cos(templates[best.t].elevation*DEG))>.25&&Math.abs(wrap(p.roll-best.roll))>20)||Math.abs(Math.log(p.scale/best.scale))>.2)&&Math.hypot(p.x-best.x,p.y-best.y)<best.scale*22);
+      const competing=supportedFits.find(p=>p!==best&&(Math.abs(p.t-best.t)>=2||(Math.min(Math.cos(templateOf(p).elevation*DEG),Math.cos(templateOf(best).elevation*DEG))>.25&&Math.abs(wrap(p.roll-best.roll))>20)||Math.abs(Math.log(p.scale/best.scale))>.2)&&Math.hypot(p.x-best.x,p.y-best.y)<best.scale*22);
       const ambiguous=!!competing&&selectionMerit(best)-selectionMerit(competing)<.045;
       const distant=supportedFits.find(p=>p!==best&&Math.hypot(p.x-best.x,p.y-best.y)>best.scale*22&&best.e.score-p.e.score<.04);
       if(distant){this.reset();return empty(timestampMs,'multiple-targets');}
@@ -486,17 +500,21 @@
       const steady=best.e.score>=.63&&!placementUncertain;
       this.streak=steady?(continuous?this.streak+1:1):0;
       if(!steady)this.stableSince=null;else if(!continuous||this.stableSince===null)this.stableSince=timestampMs;
-      const raw={x:best.x,y:best.y,scale:best.scale,roll:best.roll,t:best.t,topSeed:best.topSeed};
+      const raw={x:best.x,y:best.y,scale:best.scale,roll:best.roll,t:best.t,template:best.template,topSeed:best.topSeed};
       const toPose=p=>({center:{x:p.x/frame.w,y:p.y/frame.h},scalePerSourceWidth:p.scale/frame.w,
-        elevationDegrees:templates[p.t].elevation,rollDegrees:p.roll});
+        elevationDegrees:templateOf(p).elevation,rollDegrees:p.roll});
       const pose=toPose(raw),display={...pose,center:{...pose.center}};
       // Smooth only the display position/scale, never permission or evidence.
       if(continuous&&temporal) {
         const old=this.last.display,a=1-Math.exp(-dtMs/78);
         display.center={x:old.center.x+(pose.center.x-old.center.x)*a,y:old.center.y+(pose.center.y-old.center.y)*a};
         display.scalePerSourceWidth=old.scalePerSourceWidth+(pose.scalePerSourceWidth-old.scalePerSourceWidth)*a;
-        display.rollDegrees=old.rollDegrees+wrap(pose.rollDegrees-old.rollDegrees)*a;
-        display.elevationDegrees=old.elevationDegrees+(pose.elevationDegrees-old.elevationDegrees)*(1-Math.exp(-dtMs/167));
+        // Do not blend a freshly constrained orientation with an old visual
+        // guess: then even a fixed sensor would appear to drift off the table.
+        if(!frame.attitude?.used){
+          display.rollDegrees=old.rollDegrees+wrap(pose.rollDegrees-old.rollDegrees)*a;
+          display.elevationDegrees=old.elevationDegrees+(pose.elevationDegrees-old.elevationDegrees)*(1-Math.exp(-dtMs/167));
+        }
       }
       this.last={raw,display,time:timestampMs,frame};this.previous=frame;this.selection=null;
       if(temporal&&steady&&(this.lock||this.streak>=3&&timestampMs-this.stableSince>=120))this.lock=this.last;
@@ -508,10 +526,10 @@
       const capOnly=frame.table&&!(best.e.greens>=2&&best.e.darks>=2);
       const plausibleFits=(capOnly?fitted:supportedFits).filter(p=>capOnly?
         best.e.score-p.e.score<.045:selectionMerit(best)-selectionMerit(p)<.045);
-      const possibleAngles=frame.table?plausibleFits.map(p=>templates[p.t].elevation):[];
+      const possibleAngles=frame.table?plausibleFits.map(p=>templateOf(p).elevation):[];
       const angleRange=possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null;
       const regionAPI=globalThis.BurgerAttackRegion;
-      const regionEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templates[p.t].elevation));
+      const regionEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templateOf(p).elevation));
       return {...empty(timestampMs),evidenceTimestampMs:timestampMs,tracking:'found',targetFound:true,
         coreCenter:pose.center,coreBounds:{x:(best.x-radius)/frame.w,y:(best.y-radius)/frame.h,width:2*radius/frame.w,height:2*radius/frame.h},
         pose,displayPose:display,poseStatus:ambiguous?'ambiguous':'approximate',reason:ambiguous?'competing-poses':'current-model-fit',
@@ -525,10 +543,10 @@
         bunContour:contour,elevationRangeDegrees:angleRange,
         viewClass:angleRange?(angleRange[0]>=30?'oblique-top':angleRange[1]<=10?'side':'unknown'):null,
         // Geometric self-occlusion only. Fingers are absent from the mesh.
-        modelCenterSurface:ambiguous&&templates[competing.t].centerMaterial!==templates[best.t].centerMaterial?'unknown':templates[best.t].centerMaterial,
+        modelCenterSurface:ambiguous&&templateOf(competing).centerMaterial!==templateOf(best).centerMaterial?'unknown':templateOf(best).centerMaterial,
         debug:{fit:best.e,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
-          candidates:visuallySupported.map(p=>({elevationDegrees:templates[p.t].elevation,score:p.e.score,
-            selectionScore:selectionMerit(p),attitudePenalty:attitudeCost(p),continuous:supportedFits.includes(p),
+          candidates:visuallySupported.map(p=>({elevationDegrees:templateOf(p).elevation,rollDegrees:p.roll,score:p.e.score,
+            selectionScore:selectionMerit(p),continuous:supportedFits.includes(p),
             center:{x:p.x/frame.w,y:p.y/frame.h},scalePerSourceWidth:p.scale/frame.w})),
           capOnly,sesame:frame.cap?.sesame??null,
           streak:this.streak,holdReady:!!this.lock,placementUncertain,continuity:continuity(best,reference,dtMs)}};

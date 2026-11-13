@@ -14,25 +14,29 @@
     const ageMs=frameTimeMs-sample.receivedAtMs;
     if(ageMs<0||ageMs>MAX_AGE_MS)return {...result,reason:'stale-sample',ageMs};
     // Rear camera looks along -device Z. Horizontal table normal is Earth-up.
-    // Elevation is independent of screen rotation; model roll is still visual.
-    const elevationDegrees=Math.asin(Math.max(-1,Math.min(1,Math.cos(sample.beta*DEG)*Math.cos(sample.gamma*DEG))))/DEG;
+    const b=sample.beta*DEG,g=sample.gamma*DEG,a=(sample.screenAngle??0)*DEG;
+    const x=-Math.cos(b)*Math.sin(g),y=Math.sin(b),z=Math.cos(b)*Math.cos(g);
+    const right=x*Math.cos(a)-y*Math.sin(a),up=x*Math.sin(a)+y*Math.cos(a);
+    const elevationDegrees=Math.asin(Math.max(-1,Math.min(1,z)))/DEG;
+    // Model.project maps +Y to (-sin(roll), -cos(roll)) in screen pixels.
+    // Its roll therefore has the opposite sign to atan2(screenRight, screenUp).
+    // At the zenith roll is undefined for this rotationally symmetric model.
+    const rollDegrees=Math.hypot(right,up)<.025?0:-Math.atan2(right,up)/DEG;
     if(elevationDegrees<0)return {...result,reason:'camera-points-up',ageMs,elevationDegrees};
-    return {...result,available:true,reason:'available',ageMs,elevationDegrees};
+    return {...result,available:true,reason:'available',ageMs,elevationDegrees,rollDegrees,gravity:{right,up,z}};
   }
-  function candidate(hint,elevation,center,width,height,timestampMs) {
-    const result={used:false,penalty:0,reason:hint?.reason??'disabled'};
+  function constraint(hint,center,width,height,timestampMs) {
+    const result={used:false,reason:hint?.reason??'disabled'};
     if(!hint?.available)return result;
     // A worker may receive an old hint: never let it outlive the source frame.
     if(!Number.isFinite(timestampMs)||timestampMs-hint.sample.receivedAtMs<0||timestampMs-hint.sample.receivedAtMs>MAX_AGE_MS)
       return {...result,reason:'stale-sample'};
     if(!center)return {...result,reason:'no-current-target'};
-    // No camera intrinsics/FOV calibration yet. Use only near the optical
-    // centre and a broad 15-degree dead band; do not pretend this is exact.
+    // No camera intrinsics/FOV calibration yet. This first orthographic test
+    // applies only near the optical centre, with the restriction shown in UI.
     const offset=Math.hypot((center.x-.5)*width,(center.y-.5)*height)/Math.min(width,height);
     if(offset>.15)return {...result,reason:'off-axis-target',offset};
-    const errorDegrees=Math.abs(elevation-hint.elevationDegrees);
-    return {used:true,reason:'soft-prior',offset,errorDegrees,
-      penalty:.12*Math.min(1,Math.max(0,errorDegrees-15)/30)};
+    return {used:true,reason:'gravity-constrained',offset,elevationDegrees:hint.elevationDegrees,rollDegrees:hint.rollDegrees};
   }
-  globalThis.BurgerTableAttitude={estimate,candidate,MAX_AGE_MS};
+  globalThis.BurgerTableAttitude={estimate,constraint,MAX_AGE_MS};
 })();

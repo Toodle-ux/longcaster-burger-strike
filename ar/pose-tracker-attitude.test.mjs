@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 await import('./coarse-model.js');
-await import('./attack-region.js');
+await import('./attack-region-attitude.js');
 await import('./table-attitude.js');
 await import('./pose-tracker-attitude.js');
 
@@ -60,7 +60,7 @@ test('contradictory phone attitude cannot fabricate a target or expose a cap-onl
   const absent=t.update(overhead({cap:false}),1050,{temporal:false,tableAttitude:hint});
   assert.equal(absent.targetFound,false);assert.equal(absent.attackability,'unknown');
   const top=t.update(overhead(),1050,{temporal:false,tableAttitude:hint});
-  assert.equal(top.targetFound,true);assert.notEqual(top.modelAttackability,'exposed');
+  assert.equal(top.targetFound,false);assert.notEqual(top.modelAttackability,'exposed');
   assert.equal(top.attackability,'unknown');assert.equal(top.attitudeAssist.used,true);
   // Expiry must exactly restore visual pose/geometry, not preserve a sensor
   // decision through a cached hint. Display continuity is intentionally reset.
@@ -68,4 +68,18 @@ test('contradictory phone attitude cannot fabricate a target or expose a cap-onl
   const visual=t.update(overhead(),1200,{temporal:false});
   assert.deepEqual(expired.pose,visual.pose);assert.equal(expired.modelAttackability,visual.modelAttackability);
   assert.equal(expired.attitudeAssist.used,false);
+});
+
+test('valid gravity fixes fitted and displayed angles, while position still follows image evidence',()=>{
+  const t=new BurgerPose.Tracker({mode:'table'});
+  for(let i=0;i<8;i++){
+    const timestamp=1000+i*100,hint=BurgerTableAttitude.estimate({beta:2,gamma:1,screenAngle:0,receivedAtMs:timestamp},timestamp,
+      {source:'camera',facingMode:'environment',mode:'table'});
+    const r=t.update(overhead({dx:i}),timestamp,{tableAttitude:hint});
+    assert.equal(r.targetFound,true);assert.equal(r.attitudeAssist.used,true);
+    assert.equal(r.pose.elevationDegrees,hint.elevationDegrees);assert.ok(Math.abs(r.pose.rollDegrees-hint.rollDegrees)<1e-9);
+    assert.equal(r.displayPose.elevationDegrees,hint.elevationDegrees);assert.ok(Math.abs(r.displayPose.rollDegrees-hint.rollDegrees)<1e-9);
+    assert.equal(r.modelAttackability,'blocked');assert.equal(r.attackability,'unknown');
+    if(i===7)assert.ok(r.coreCenter.x>.52);
+  }
 });

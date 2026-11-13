@@ -8,35 +8,17 @@
   let records=[],marks=[],counts={found:0,unknown:0,lost:0},sourceSize=null,lastAnalyzedAt=0,lastSourceStamp=0;
   let frameCallback=null,frameSerial=0,analyzedSerial=-1,previousVideoFrame=null,frameTiming=null;
   let frameIntervals=[],analysisTimes=[],staleEvents=0,wasStale=false,previousAnalysis=null;
-  let attitudeSample=null,attitudeEnabled=false,attitudePending=false,attitudeGeneration=0,attitudeState='未开启',attitudeHint=null;
+  const attitudeReader=globalThis.BurgerAttitudeInput.createReader();
+  let attitudeHint=null,lastSensorReport=0;
   const attitudeReasons={'not-live-camera':'照片／录像不使用当前手机姿态','not-table-mode':'自由手持使用视觉判断',
     'rear-camera-unconfirmed':'后置摄像头方向未确认','no-sample':'尚未收到有效姿态','stale-sample':'姿态数据已过期',
     'camera-points-up':'镜头朝上，不适用桌面假设','off-axis-target':'目标偏离画面中央，使用视觉判断',
-    'no-current-target':'暂无视觉目标','soft-prior':'姿态辅助选择视觉候选','available':'姿态可用','disabled':'使用视觉判断'};
-  function onAttitude(event){
-    if(![event.beta,event.gamma].every(Number.isFinite))return;
-    attitudeSample={beta:event.beta,gamma:event.gamma,screenAngle:screen.orientation?.angle??window.orientation??0,receivedAtMs:performance.now()};
-    attitudeState='已收到数据';
-  }
-  function disableAttitude(message='未开启'){
-    attitudeGeneration++;attitudeEnabled=attitudePending=false;attitudeSample=attitudeHint=null;attitudeState=message;
-    window.removeEventListener('deviceorientation',onAttitude);
-    $('attitude').textContent='开启姿态辅助';$('attitude').setAttribute('aria-pressed','false');
-  }
+    'no-current-target':'暂无视觉目标','gravity-constrained':'手机姿态直接约束俯仰与侧倾','available':'姿态可用','disabled':'使用视觉判断'};
   $('attitude').onclick=async()=>{
-    if(attitudeEnabled||attitudePending){disableAttitude();invalidate('no-supported-target');return;}
-    const Sensor=window.DeviceOrientationEvent,token=++attitudeGeneration;
-    if(!Sensor||!isSecureContext){disableAttitude('此浏览器或地址不支持');report();return;}
-    attitudePending=true;attitudeState='等待授权';$('attitude').textContent='取消姿态辅助';report();
-    try{
-      // Must stay in this click handler for iOS permission's user gesture.
-      const permission=typeof Sensor.requestPermission==='function'?await Sensor.requestPermission():'granted';
-      if(token!==attitudeGeneration)return;
-      if(permission!=='granted'){disableAttitude('未授权');report();return;}
-      attitudePending=false;attitudeEnabled=true;attitudeState='等待数据';
-      $('attitude').textContent='关闭姿态辅助';$('attitude').setAttribute('aria-pressed','true');
-      window.addEventListener('deviceorientation',onAttitude);report();
-    }catch{if(token===attitudeGeneration){disableAttitude('姿态不可用');report();}}
+    const state=attitudeReader.snapshot();
+    if(state.enabled||state.pending)attitudeReader.stop();
+    else {const request=attitudeReader.enable();reportSensor();await request;}
+    attitudeHint=null;invalidate('no-supported-target');
   };
   $('attitude-apply').onchange=()=>{invalidate('no-supported-target');lastTime=-1;};
   const usesFrameCallbacks=typeof video.requestVideoFrameCallback==='function';
@@ -65,11 +47,21 @@
     'multiple-targets':'多个位置的拟合分数接近，暂不选择','stopped':'已停止','paused':'暂停核对，实时跟踪已清除','stale':'画面未更新，结果已过期','hidden':'页面在后台'};
   function resetLog(){records=[];marks=[];counts={found:0,unknown:0,lost:0};$('marks').textContent='0 条人工核对';}
   function live(){return (mode==='video'||mode==='camera')&&!video.paused&&!document.hidden;}
-  function report() {
+  function reportSensor(){
+    const state=attitudeReader.snapshot();
+    $('attitude').textContent=state.pending?'取消姿态授权':state.enabled?'关闭姿态辅助':'开启姿态辅助';
+    $('attitude').setAttribute('aria-pressed',String(state.enabled));
     const assist=out.attitudeAssist,reason=assist?.reason??attitudeHint?.reason;
-    $('attitude-status').textContent=`姿态：${attitudeState} · `+
-      (!attitudeEnabled?'使用视觉判断':!$('attitude-apply').checked?'仅记录，使用视觉判断':attitudeReasons[reason]??'等待相机分析')+
-      (Number.isFinite(attitudeHint?.elevationDegrees)?` · 镜头向下约 ${attitudeHint.elevationDegrees.toFixed(1)}° · 数据年龄 ${Math.round(attitudeHint.ageMs)} ms`:'');
+    const permission={granted:'已授权',denied:'未授权','not-required':'无需权限弹窗','not-requested':'尚未请求',unsupported:'接口不可用',error:'授权失败'}[state.permission];
+    const receiving={requesting:'等待授权',disabled:'未开启',receiving:'正在收到有效数据',stale:'数据已过期',waiting:'等待数据','no-data':'已开启但未收到有效数据'}[state.state];
+    $('attitude-status').textContent=`姿态权限：${permission} · ${receiving} · 有效事件 ${state.validCount} / 全部 ${state.eventCount}`+
+      (state.ageMs!==null?` · 数据年龄 ${Math.round(state.ageMs)} ms`:'')+' · '+
+      (!$('attitude-apply').checked?'仅记录，使用视觉判断':state.state!=='receiving'?'当前使用视觉判断':attitudeReasons[reason]??'等待相机分析')+
+      (state.state==='receiving'&&attitudeHint?.available?` · 向下 ${attitudeHint.elevationDegrees.toFixed(1)}° / 侧倾 ${attitudeHint.rollDegrees.toFixed(1)}°`:'')+
+      (state.state==='no-data'?'。请在 Safari 打开此测试页后重试；这不是已经生效。':'');
+  }
+  function report() {
+    reportSensor();
     const found=out.tracking==='found',held=out.tracking==='unknown';
     $('tracking').textContent=found?(out.poseStatus==='ambiguous'?'找到候选 · 姿态不确定':live()?'正在匹配':'静态候选'):held?'未知 · 保留显示':'未找到／已停止';
     $('tracking').style.background=found&&out.poseStatus!=='ambiguous'?'#28614a':held||out.poseStatus==='ambiguous'?'#705b30':'#48534e';
@@ -93,6 +85,12 @@
     const element=mode==='image'?still:video.readyState>=2?video:buffer;
     if(!mode||!(element.naturalWidth||element.videoWidth||element.width))return;
     paint.drawImage(element,0,0,canvas.width,canvas.height);
+    if(mode==='camera'&&$('attitude-apply').checked&&$('tracking-mode').value==='table'){
+      // Keep the observed bun centre inside this guide for the uncalibrated
+      // orthographic experiment; outside it the interface says visual-only.
+      paint.save();paint.strokeStyle='#a7dbe577';paint.setLineDash([5,5]);paint.beginPath();
+      paint.arc(canvas.width/2,canvas.height/2,Math.min(canvas.width,canvas.height)*.15,0,Math.PI*2);paint.stroke();paint.restore();
+    }
     if($('cap').checked&&out.bunContour?.length){
       paint.save();paint.strokeStyle='#ff66ec';paint.lineWidth=2*canvas.width/canvas.clientWidth;paint.beginPath();
       out.bunContour.forEach((p,i)=>i?paint.lineTo(p.x*canvas.width,p.y*canvas.height):paint.moveTo(p.x*canvas.width,p.y*canvas.height));
@@ -130,19 +128,21 @@
     // the apparent physical speed or double the number of seconds held in it.
     lastSourceStamp=mode==='video'?video.currentTime*1000:start;
     const image=pixels.getImageData(0,0,bw,bh),readbackMs=performance.now()-start;
-    attitudeHint=globalThis.BurgerTableAttitude.estimate(attitudeEnabled?attitudeSample:null,start,
+    const sensor=attitudeReader.snapshot();
+    attitudeHint=globalThis.BurgerTableAttitude.estimate(sensor.enabled?sensor.sample:null,start,
       {source:mode,facingMode:stream?.getVideoTracks()[0]?.getSettings().facingMode,mode:$('tracking-mode').value});
     out=tracker.update(image,lastSourceStamp,{temporal,tableAttitude:$('attitude-apply').checked?attitudeHint:null});elapsed=performance.now()-start;
     analysisTimes.push(elapsed);if(analysisTimes.length>300)analysisTimes.shift();
     records.push({mediaTime:mode==='video'?video.currentTime:null,processingMs:elapsed,readbackMs,
       analysisIntervalMs:previousAnalysis===null?null:start-previousAnalysis,frameTiming,staleEvents,isLive:temporal,
-      attitudeInput:attitudeHint,attitudeApplied:$('attitude-apply').checked,...out});
+      attitudeInput:attitudeHint,attitudeReader:sensor,attitudeApplied:$('attitude-apply').checked,...out});
     previousAnalysis=start;counts[out.tracking]++;
     $('empty').hidden=true;report();draw();
   }
   function invalidate(reason){tracker.reset();coreDisplay.reset();out=api.empty(performance.now(),reason);report();draw();}
-  function stop() {
-    disableAttitude();
+  function stop({keepAttitude=false}={}) {
+    if(!keepAttitude)attitudeReader.stop();
+    attitudeReader.clearSample();attitudeHint=null;
     resetTiming();
     generation++;mode=null;stream?.getTracks().forEach(t=>t.stop());stream=null;video.pause();video.srcObject=null;video.removeAttribute('src');video.load();still.removeAttribute('src');
     if(url)URL.revokeObjectURL(url);url=null;lastTime=-1;lastCompute=-Infinity;$('playback').hidden=true;invalidate('stopped');paint.clearRect(0,0,canvas.width,canvas.height);$('empty').hidden=false;
@@ -160,7 +160,7 @@
     event.target.value='';
   };
   $('camera').onclick=async()=>{
-    stop();resetLog();const token=generation;
+    stop({keepAttitude:true});resetLog();const token=generation;
     if(!isSecureContext||!navigator.mediaDevices?.getUserMedia){$('notice').textContent='此地址不能开启摄像头，需要 HTTPS；电脑可先回放本机视频。';return;}
     $('notice').textContent='等待摄像头权限…';
     try {
@@ -190,7 +190,8 @@
   };
   $('mark').onclick=()=>{marks.push({mediaTime:mode==='video'?video.currentTime:null,truth:$('truth').value,observation:out});$('marks').textContent=marks.length+' 条人工核对';};
   $('export').onclick=()=>{
-    const result={schema:'burger-pose-validation/v2',source,sourceSize,geometry:api.geometry,projection:'orthographic-approximation',userAgent:navigator.userAgent,
+    const result={schema:'burger-pose-validation/v3',source,sourceSize,geometry:api.geometry,projection:'orthographic-approximation',userAgent:navigator.userAgent,
+      attitudeReader:attitudeReader.snapshot(),
       attitudeTiming:'performance-ms event arrival and image readback; not hardware synchronized',
       timestampClock:mode==='video'?'media-ms':'performance-ms',holdMs:api.HOLD_MS,
       trackingMode:$('tracking-mode').value,
@@ -203,6 +204,7 @@
     try{if(document.fullscreenElement)await document.exitFullscreen();else if(document.fullscreenEnabled)await document.documentElement.requestFullscreen();else $('notice').textContent='此浏览器不支持整页全屏，可继续在当前窗口测试。';}catch{$('notice').textContent='全屏请求未成功。';}
   };
   function tick(now) {
+    if(now-lastSensorReport>=250){lastSensorReport=now;reportSensor();}
     if(live()) {
       const hasNewFrame=usesFrameCallbacks?frameSerial!==analyzedSerial:lastTime!==video.currentTime;
       if(video.readyState>=2&&!video.seeking&&now-lastCompute>=80&&hasNewFrame){lastCompute=now;lastTime=video.currentTime;analyzedSerial=frameSerial;analyze(video,true);if(mode==='video'){$('seek').value=video.currentTime;$('time').textContent=video.currentTime.toFixed(1)+' s';}}
@@ -215,6 +217,6 @@
     }
     requestAnimationFrame(tick);
   }
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){attitudeSample=null;invalidate('hidden');}else{lastTime=-1;tracker.reset();}});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){attitudeReader.clearSample();invalidate('hidden');}else{lastTime=-1;tracker.reset();}});
   window.addEventListener('pagehide',stop);window.addEventListener('resize',draw);report();requestAnimationFrame(tick);
 })();

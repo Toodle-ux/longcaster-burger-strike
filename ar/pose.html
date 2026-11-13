@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111918"><title>汉堡 · 自动对齐与跟踪验证</title>
-<link rel="stylesheet" href="./validation.css?v=attitude-1">
+<link rel="stylesheet" href="./validation.css?v=attitude-2">
 <style>
 a{color:#a7e4b7}.status strong{min-width:130px}#pose-metrics{font:13px monospace;color:#bdd7c6;line-height:1.8}.toolbar label{font-size:13px}#view{touch-action:manipulation}#playback #seek{min-width:120px}#empty{line-height:1.6;text-align:center;padding:20px}#model-info{font-size:12px}.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#b0c3b8;margin:10px 0}.legend span:before{content:'●';color:var(--c);margin-right:5px}#count{color:#9ab5a5;font-size:12px;line-height:1.8}#conditions{width:auto}
+#attitude-status{position:sticky;top:0;z-index:3;background:#14221e;padding:10px;border:1px solid #456353;font-size:13px;line-height:1.6}
 </style>
-<script defer src="./coarse-model.js?v=attitude-1"></script><script defer src="./attack-region.js?v=attitude-1"></script><script defer src="./table-attitude.js?v=attitude-1"></script><script defer src="./pose-tracker-attitude.js?v=attitude-1"></script><script defer src="./core-display.js?v=attitude-1"></script><script defer src="./pose-validation.js?v=attitude-1"></script>
+<script defer src="./coarse-model.js?v=attitude-2"></script><script defer src="./attack-region-attitude.js?v=attitude-2"></script><script defer src="./table-attitude.js?v=attitude-2"></script><script defer src="./attitude-input.js?v=attitude-2"></script><script defer src="./pose-tracker-attitude.js?v=attitude-2"></script><script defer src="./core-display.js?v=attitude-2"></script><script defer src="./pose-validation.js?v=attitude-2"></script>
 </head>
 <body><main>
-  <header><h1>汉堡 · 自动对齐与跟踪验证</h1><a href="../?v=10">返回手机游戏 ↗</a></header>
+  <header><h1>汉堡 · 自动对齐与跟踪验证</h1><a href="../?v=10">返回手机游戏 ↗</a></header><p>姿态验证 / attitude-2 · 日志 v3</p>
   <p>固定模型尺寸，自动估计位置、大小和倾斜。连续跟踪会约束位置与大小的突变；短暂缺少证据时，最多保留核心位置半秒。本页不计分，也不提供攻击许可。</p>
   <div class="toolbar"><label>场景 <select id="tracking-mode"><option value="table" selected>桌面直立（新实验）</option><option value="handheld">自由手持（原实验）</option></select></label><label><input id="cap" type="checkbox" checked> 显示检测到的面包边界</label></div>
   <p>桌面模式假定汉堡直立，允许手机小幅侧倾（约 ±45°），不适用于倒放或大幅侧翻。顶视可用完整面包轮廓与芝麻定位，不要求露出夹心。粉色线是颜色检测后补全的边界候选，可能漏检或包含背景；彩色线是拟合模型。可隐藏模型单独检查边界。</p>
@@ -18,6 +19,7 @@ a{color:#a7e4b7}.status strong{min-width:130px}#pose-metrics{font:13px monospace
   <p id="notice" role="status">素材只在本机处理，无 CDN、在线模型或云端上传。手机摄像头需可访问的 HTTPS 地址。</p>
   <div class="toolbar"><button id="attitude" aria-pressed="false">开启姿态辅助</button><label><input id="attitude-apply" type="checkbox" checked> 将姿态用于桌面匹配（实验）</label></div>
   <p id="attitude-status" role="status">姿态辅助未开启，使用视觉判断。开启后请将汉堡保持在画面中央；取消勾选可只记录感应数据。</p>
+  <p>姿态实验：汉堡直立放在水平桌面，将上面包保持在中央虚线圈内。只有显示“正在收到有效数据”且“手机姿态直接约束”才算生效；仅授权不代表生效。没有数据时请用 Safari 重试。照片、录像和自由手持模式仍用视觉判断。</p>
   <div id="stage"><video id="video" playsinline muted hidden></video><img id="still" alt="本机验证照片" hidden><canvas id="view" width="960" height="540" aria-label="自动对齐画面，点击可限定重新寻找的范围"></canvas><div id="empty">选择现有照片或视频开始验证</div></div>
   <div class="legend"><span style="--c:#ff66ec">检测边界候选</span><span style="--c:#ffb75c">模型上面包</span><span style="--c:#58d4ba">模型夹心</span><span style="--c:#e6cf88">模型下面包</span><span style="--c:#fff">白十字：模型内部中心</span></div>
   <div class="toolbar" id="playback" hidden><button id="play">播放／暂停</button><input id="seek" type="range" min="0" max="1" step=".01" value="0" aria-label="视频进度"><span id="time">0.0 s</span><label>速度 <select id="speed"><option value=".5">0.5×</option><option value="1" selected>1×</option></select></label></div>
