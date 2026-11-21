@@ -93,7 +93,9 @@
     // Several separated pale islands surrounded by orange; a single glare,
     // HUD line or pale table edge is not evidence of a sesame bun.
     const spread=spots.length?bounds(spots):null;
-    return {count:spots.length,strong:spots.length>=3&&spots.reduce((s,p)=>s+p.count,0)>=5&&
+    return {count:spots.length,offsetX:spots.length?Math.abs(spots.reduce((s,p)=>s+p.x,0)/spots.length-cx)/w:0,
+      spanX:spread?(spread.right-spread.left)/w:0,
+      strong:spots.length>=3&&spots.reduce((s,p)=>s+p.count,0)>=5&&
       spread.right-spread.left>w*.22&&spread.bottom-spread.top>h*.18};
   }
   function capObservation(input,frame,selection) {
@@ -124,6 +126,10 @@
         return gw>=w*.4&&gw<=w*1.6&&Math.abs(g.x-q.x)<w*.5&&g.y>q.y&&g.y-q.y<w*1.2&&g.count>5;
       });
       const sesame=sesameEvidence(frame,q,whites);
+      // A connected orange background/drink can borrow the burger's sesame.
+      // Reject a lopsided cluster, then retry the stricter colour proposals;
+      // never crop an invented bun out of an oversized connected component.
+      if(sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
       // Overhead views hide the filling. They may propose a cap independently;
       // acceptance still requires a rounded complete contour and a top-view fit.
       if(!green&&!(h/w>=.65&&sesame.strong))continue;
