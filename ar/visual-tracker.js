@@ -13,7 +13,7 @@
     for(let i=0;i<data.length;i++)data[i]=(input.data[4*i]+2*input.data[4*i+1]+input.data[4*i+2])/4;
     return {data,width:input.width,height:input.height};
   }
-  function features(frame,box){
+  function features(frame,box,input=null){
     const out=[],{data:g,width:w,height:h}=frame,c=centre(box);
     // Stay inside the crown: including the nearby table makes a stationary
     // background look like a very stable burger track.
@@ -31,6 +31,32 @@
     const picked=[],gap=Math.max(4,box.width*.09);
     for(const p of out)if(!picked.some(q=>Math.hypot(p.x-q.x,p.y-q.y)<gap)){
       picked.push(p);if(picked.length===24)break;
+    }
+    // In a side view the crown is thin. Borrow a few points from the visible
+    // upper filling only after its colour/layer relationship is confirmed.
+    // Keep the cap anchor and require cap matches in motion(); the tray must
+    // never become a replacement track when the burger disappears.
+    if(picked.length>=3&&picked.length<12&&box.height/box.width<.6&&input&&
+      globalThis.BurgerPose?.confirmCap?.(input,box).supported){
+      const extra=[],label=(x,y)=>{
+        const k=(Math.round(y)*input.width+Math.round(x))*4;
+        return globalThis.BurgerPose.classify(input.data[k],input.data[k+1],input.data[k+2]);
+      };
+      const filling=v=>v===1||v===2||v===4;
+      for(let y=Math.ceil(box.y+box.height+6);y<Math.min(h-6,box.y+box.height+box.width*.32);y+=2)
+      for(let x=Math.max(6,Math.ceil(box.x+box.width*.2));x<Math.min(w-6,box.x+box.width*.8);x+=2){
+        if(!filling(label(x,y))||[[-4,0],[4,0],[0,-4],[0,4]].filter(([dx,dy])=>filling(label(x+dx,y+dy))).length<3)continue;
+        let xx=0,yy=0,xy=0;
+        for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){
+          const k=(y+j)*w+x+i,dx=g[k+1]-g[k-1],dy=g[k+w]-g[k-w];xx+=dx*dx;yy+=dy*dy;xy+=dx*dy;
+        }
+        const quality=(xx+yy-Math.hypot(xx-yy,2*xy))/2;
+        if(quality>180)extra.push({x,y,quality,region:'filling'});
+      }
+      extra.sort((a,b)=>b.quality-a.quality);let added=0;
+      for(const p of extra)if(!picked.some(q=>Math.hypot(p.x-q.x,p.y-q.y)<gap)){
+        picked.push(p);if(++added===8)break;
+      }
     }
     return picked;
   }
@@ -109,7 +135,7 @@
       // Search backwards independently. Seeding a tiny window at the known
       // original point falsely validates matches between similar sesame spots.
       const back=match(current,previous,q,hint?{x:q.x-hint.x,y:q.y-hint.y}:q,radius);
-      if(back&&Math.hypot(back.x-p.x,back.y-p.y)<1.5)pairs.push({from:p,to:q});
+      if(back&&Math.hypot(back.x-p.x,back.y-p.y)<1.5)pairs.push({from:p,to:{...q,region:p.region}});
     }
     if(pairs.length<5)return null;
     const tolerance=clamp(box.width*.025,1.4,3);let inliers=[];
@@ -121,6 +147,7 @@
       if(good.length>inliers.length)inliers=good;
     }
     if(inliers.length<5||inliers.length<pairs.length*.65)return null;
+    if(points.some(p=>p.region==='filling')&&inliers.filter(p=>p.from.region!=='filling').length<3)return null;
     const xs=inliers.map(p=>p.from.x),ys=inliers.map(p=>p.from.y);
     if(Math.max(...xs)-Math.min(...xs)<box.width*.3||Math.max(...ys)-Math.min(...ys)<box.height*.22)return null;
     const m=solve(inliers);return {matrix:m,matched:pairs.length,inliers:inliers.length,
@@ -190,7 +217,7 @@
       }
       if(!this.box&&detection){
         if(this.pending&&agrees(this.pending.box,detection.box)&&time-this.pending.time<=300){
-          const selected=features(frame,detection.box);
+          const selected=features(frame,detection.box,input);
           if(selected.length>=5){this.box={...detection.box};this.points=selected;this.confirmedAt=time;this.reference=appearance(frame,this.box);state='tracking';reason='acquired';}
           else {state='candidate';reason='not-enough-texture';}
         }else if(state!=='unknown'){state='candidate';reason='confirming-detection';}
@@ -199,7 +226,7 @@
       if(this.box){
         // Replenish points in the current tracked ROI without snapping its
         // centre/size to the new colour mask. All coordinates stay unsmoothed.
-        if(this.points.length<12||run)this.points=features(frame,this.box);
+        if(this.points.length<12||run)this.points=features(frame,this.box,input);
       }
       this.previous=frame;this.time=time;
       const out={timestampMs:time,state,reason,targetFound:state==='tracking',

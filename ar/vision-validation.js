@@ -4,9 +4,9 @@
   const tracker=new BurgerVisual.Tracker();let mode=null,stream=null,url=null,generation=0,rows=[],marks=[],out=null,source='';
   let serial=0,analyzed=-1,callback=null,lastMedia=-1,lastFrameAt=0,lastWork=0;
   const hasCallbacks=typeof video.requestVideoFrameCallback==='function';
-  const reasons={'no-detection':'未检测到面包','confirming-detection':'等待连续检测确认','not-enough-texture':'纹理不足',
+  const reasons={'no-detection':'未检测到面包','confirming-detection':'等待连续检测确认','not-enough-texture':'纹理不足 · 请停稳，若模糊请稍微拉远',
     acquired:'检测初始化','image-track':'图像纹理跟踪','image-track-verified':'图像跟踪＋检测校验','image-track-local':'图像跟踪＋局部夹层确认',
-    'texture-track-failed':'局部纹理匹配失败','detector-disagreement':'图像跟踪与检测不一致','detection-timeout':'超过一秒未获检测确认','out-of-frame':'目标移出画面'};
+    'texture-track-failed':'纹理匹配失败 · 请停稳并检查清晰度','detector-disagreement':'图像跟踪与检测不一致','detection-timeout':'检测确认已过期','out-of-frame':'目标移出画面'};
   function watch(){if(hasCallbacks&&mode&&callback===null)callback=video.requestVideoFrameCallback(now=>{callback=null;serial++;lastFrameAt=now;watch();});}
   function clear(){tracker.reset();out=null;$('state').textContent='等待重新定位';$('output').textContent='';}
   function draw(){
@@ -16,7 +16,7 @@
     if(out.detection){paint.strokeStyle='#ff79df';paint.lineWidth=ratio;paint.beginPath();out.detection.contour.forEach((p,i)=>i?paint.lineTo(p.x,p.y):paint.moveTo(p.x,p.y));paint.closePath();paint.stroke();}
     if(out.targetBounds){const b=out.targetBounds;paint.strokeStyle='#77edc5';paint.lineWidth=2*ratio;paint.strokeRect(b.x,b.y,b.width,b.height);
       paint.strokeStyle='#fff';paint.beginPath();paint.moveTo(out.anchor.x-6*ratio,out.anchor.y);paint.lineTo(out.anchor.x+6*ratio,out.anchor.y);paint.moveTo(out.anchor.x,out.anchor.y-6*ratio);paint.lineTo(out.anchor.x,out.anchor.y+6*ratio);paint.stroke();
-      paint.fillStyle='#fff';for(const p of out.points){paint.beginPath();paint.arc(p.x,p.y,ratio,0,2*Math.PI);paint.fill();}}
+      for(const p of out.points){paint.fillStyle=p.region==='filling'?'#72ccff':'#fff';paint.beginPath();paint.arc(p.x,p.y,ratio,0,2*Math.PI);paint.fill();}}
   }
   function analyze(element,temporal=true){
     const w=element.videoWidth||element.naturalWidth,h=element.videoHeight||element.naturalHeight;if(!w||!h)return;
@@ -68,7 +68,7 @@
   $('compare').onchange=()=>{if(mode==='image')analyze(still,false);};
   $('mark').onclick=()=>{marks.push({truth:$('truth').value,recordIndex:rows.length-1,observation:out});$('marks').textContent=marks.length+' 条人工备注';};
   $('export').onclick=()=>{
-    const result={schema:'burger-visual-validation/v1',source,userAgent:navigator.userAgent,coordinates:'analysis pixels; visual bun anchor, not core',
+    const result={schema:'burger-visual-validation/v1',implementation:'vision-4',source,userAgent:navigator.userAgent,coordinates:'analysis pixels; visual bun anchor, not core',
       camera:stream?.getVideoTracks()[0]?.getSettings()??null,records:rows,marks};
     const blob=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=document.createElement('a');
     a.href=blob;a.download='burger-visual-validation.json';a.click();setTimeout(()=>URL.revokeObjectURL(blob),1000);

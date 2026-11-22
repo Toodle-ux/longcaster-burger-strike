@@ -143,11 +143,16 @@
       const outline=hull(points);
       // Long straight bridges in the crown are usually convex completion
       // across attached background. Allow a flat lower rim in a side view.
-      const bridge=outline.some((p,i)=>{
+      const bridges=outline.filter((p,i)=>{
         const next=outline[(i+1)%outline.length];
         return Math.hypot(p.x-next.x,p.y-next.y)>w*.45&&(p.y+next.y)/2<q.bottom-h*.2;
       });
-      if(bridge)continue;
+      // A shallow real crown can have a long, almost flat top. Only accept
+      // that exception when the image supports the boundary AND filling;
+      // a convex bridge across orange background must still be rejected.
+      if(bridges.length&&!(green&&h/w<.6&&
+        confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported&&
+        bridges.every(p=>supportedTopEdge(frame,p,outline[(outline.indexOf(p)+1)%outline.length],q))))continue;
       candidates.push({points:outline,...q,width:w,green,redRatio,sesame});
     }
     candidates.sort((a,b)=>b.count-a.count);
@@ -156,6 +161,21 @@
     if(candidates.length)return candidates[0];
     }
     return null;
+  }
+  function supportedTopEdge(frame,a,b,box){
+    const w=box.right-box.left+1,h=box.bottom-box.top+1,dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);
+    if(Math.abs(dy)>Math.abs(dx)*.35||(a.y+b.y)/2>box.top+h*.45)return false;
+    const d=Math.max(2,w*.035),nx=-dy/length,ny=dx/length;
+    let supported=0;
+    for(let i=1;i<=7;i++){
+      const x=a.x+dx*i/8,y=a.y+dy*i/8;
+      const inside=Math.round(y+ny*d)*frame.w+Math.round(x+nx*d);
+      const outside=Math.round(y-ny*d)*frame.w+Math.round(x-nx*d);
+      const warm=v=>v===BUN||v===YELLOW||v===WHITE;
+      if(warm(frame.labels[inside])&&!warm(frame.labels[outside])&&
+        Math.abs(frame.gray[inside]-frame.gray[outside])>=18)supported++;
+    }
+    return supported>=5;
   }
   function classify(r,g,b) {
     const hi=Math.max(r,g,b),lo=Math.min(r,g,b),delta=hi-lo,s=delta/Math.max(1,hi);
