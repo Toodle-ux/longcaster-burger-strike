@@ -142,32 +142,56 @@
     // identity without replacing the independently tracked centre or scale.
     return Math.hypot(p.x-q.x,p.y-q.y)<a.width*.3&&Math.abs(Math.log(b.width/a.width))<.3;
   }
+  function appearance(frame,box){
+    const values=[];
+    for(let y=0;y<10;y++)for(let x=0;x<16;x++){
+      const u=(x+.5)/16,v=(y+.5)/10;
+      if(((u-.5)/.45)**2+((v-.5)/.45)**2>1)continue;
+      const px=Math.round(box.x+u*box.width),py=Math.round(box.y+v*box.height);
+      if(px<0||py<0||px>=frame.width||py>=frame.height)return null;
+      values.push(frame.data[py*frame.width+px]);
+    }
+    const mean=values.reduce((s,v)=>s+v,0)/values.length;
+    const centred=values.map(v=>v-mean),norm=Math.hypot(...centred);
+    return norm>values.length?centred.map(v=>v/norm):null;
+  }
+  const correlation=(a,b)=>a&&b?a.reduce((s,v,i)=>s+v*b[i],0):-1;
   class Tracker{
-    constructor({detect=input=>globalThis.BurgerPose.detectCap(input)}={}){this.detect=detect;this.reset();}
-    reset(){this.previous=null;this.box=null;this.points=[];this.time=-Infinity;this.confirmedAt=-Infinity;this.detectAt=-Infinity;this.pending=null;this.lastOutput=null;}
+    constructor({detect=input=>globalThis.BurgerPose.detectCap(input),confirm=(input,box)=>globalThis.BurgerPose?.confirmCap?.(input,box)}={}){this.detect=detect;this.confirm=confirm;this.reset();}
+    reset(){this.previous=null;this.box=null;this.points=[];this.time=-Infinity;this.confirmedAt=-Infinity;this.detectAt=-Infinity;this.pending=null;this.lastOutput=null;this.reference=null;this.localAt=-Infinity;}
     update(input,time,{detection:given}={}){
       if(time<=this.time||time-this.time>300||this.previous&&(this.previous.width!==input.width||this.previous.height!==input.height))this.reset();
       const frame=gray(input),run=given!==undefined||!this.box||time-this.detectAt>=250;
       const detection=run?(given===undefined?this.detect(input):given):null;
       if(run)this.detectAt=time;
-      let state='lost',reason='no-detection',flow=null;
+      let state='lost',reason='no-detection',flow=null,localEvidence=null;
       if(this.box&&this.previous){
         flow=motion(this.previous,frame,this.points,this.box);
         if(flow){
           const predicted=movedBox(this.box,flow.matrix);
           const inside=predicted.x>=0&&predicted.y>=0&&predicted.x+predicted.width<input.width&&predicted.y+predicted.height<input.height;
-          if(inside&&(!detection||verifies(predicted,detection.box))&&time-this.confirmedAt<=1000){
+          const verified=!!detection&&verifies(predicted,detection.box);
+          if(run&&inside&&!verified&&time-this.confirmedAt<=3000){
+            const appearanceScore=correlation(this.reference,appearance(frame,predicted));
+            localEvidence={...this.confirm(input,predicted),appearanceScore};
+            this.localAt=localEvidence.supported&&appearanceScore>=.8&&flow.inliers>=7?time:-Infinity;
+          }
+          // Local checks cannot renew the global identity indefinitely. They
+          // require fresh layered appearance + flow and expire after 3 seconds
+          // from the last full detection. Never freeze an old marker as evidence.
+          const localFresh=time-this.localAt<=300&&time-this.confirmedAt<=3000;
+          if(inside&&(verified||localFresh||!detection&&time-this.confirmedAt<=1000)){
             this.box=predicted;this.points=flow.points;
-            if(detection)this.confirmedAt=time;
-            state='tracking';reason=detection?'image-track-verified':'image-track';
+            if(verified){this.confirmedAt=time;this.reference=appearance(frame,predicted);this.localAt=-Infinity;}
+            state='tracking';reason=verified?'image-track-verified':localFresh?'image-track-local':'image-track';
           }else reason=!inside?'out-of-frame':time-this.confirmedAt>1000?'detection-timeout':'detector-disagreement';
         }else reason='texture-track-failed';
-        if(state!=='tracking'){this.box=null;this.points=[];this.pending=null;state='unknown';}
+        if(state!=='tracking'){this.box=null;this.points=[];this.pending=null;this.reference=null;this.localAt=-Infinity;state='unknown';}
       }
       if(!this.box&&detection){
         if(this.pending&&agrees(this.pending.box,detection.box)&&time-this.pending.time<=300){
           const selected=features(frame,detection.box);
-          if(selected.length>=5){this.box={...detection.box};this.points=selected;this.confirmedAt=time;state='tracking';reason='acquired';}
+          if(selected.length>=5){this.box={...detection.box};this.points=selected;this.confirmedAt=time;this.reference=appearance(frame,this.box);state='tracking';reason='acquired';}
           else {state='candidate';reason='not-enough-texture';}
         }else if(state!=='unknown'){state='candidate';reason='confirming-detection';}
         this.pending={box:detection.box,time};
@@ -184,6 +208,7 @@
         matchedPoints:flow?.matched??0,inlierPoints:flow?.inliers??0,
         scaleChange:flow?.scale??null,rotationChange:flow?.rotation??null,
         lastDetectionAgeMs:Number.isFinite(this.confirmedAt)?time-this.confirmedAt:null,
+        localEvidence,lastLocalConfirmationAgeMs:Number.isFinite(this.localAt)?time-this.localAt:null,
         coreCenter:null,attackability:'unknown',experimental:true};
       this.lastOutput=out;return out;
     }

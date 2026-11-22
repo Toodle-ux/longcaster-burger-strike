@@ -567,5 +567,32 @@
     return {box:{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top},
       contour:cap.points,sesame:cap.sesame,hasFilling:!!cap.green};
   }
-  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap};
+  // Confirmation only: requires a previously tracked cap box. It neither
+  // initializes a target nor infers the hidden core/attackable state.
+  function confirmCap(input,box){
+    const {data,width,height}=input;
+    const read=(x,y)=>{
+      x=Math.round(x);y=Math.round(y);
+      if(x<0||y<0||x>=width||y>=height)return NONE;
+      const k=(y*width+x)*4;return classify(data[k],data[k+1],data[k+2]);
+    };
+    let warm=0,capN=0,green=0,dark=0;const greenColumns=new Set(),darkColumns=new Set();
+    for(let y=0;y<10;y++)for(let x=0;x<20;x++){
+      const u=(x+.5)/20,v=(y+.5)/10;
+      if(((u-.5)/.46)**2+((v-.5)/.46)**2>1)continue;
+      const label=read(box.x+u*box.width,box.y+v*box.height);
+      capN++;if(label===BUN||label===YELLOW)warm++;
+    }
+    // Several columns must contain filling, not a small green patch beside a
+    // glass. A cap-only overhead view cannot use this side-view fallback.
+    for(let y=0;y<12;y++)for(let x=0;x<20;x++){
+      const label=read(box.x+(.1+.8*(x+.5)/20)*box.width,
+        box.y+box.height+(y+.5)/12*box.width*.6),column=Math.floor(x/5);
+      if(label===GREEN){green++;greenColumns.add(column);}
+      if(label===DARK){dark++;darkColumns.add(column);}
+    }
+    return {supported:warm/capN>=.3&&green>=5&&dark>=15&&greenColumns.size>=2&&darkColumns.size>=3,
+      warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
+  }
+  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap};
 })();

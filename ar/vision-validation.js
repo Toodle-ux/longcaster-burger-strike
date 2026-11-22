@@ -5,7 +5,7 @@
   let serial=0,analyzed=-1,callback=null,lastMedia=-1,lastFrameAt=0,lastWork=0;
   const hasCallbacks=typeof video.requestVideoFrameCallback==='function';
   const reasons={'no-detection':'未检测到面包','confirming-detection':'等待连续检测确认','not-enough-texture':'纹理不足',
-    acquired:'检测初始化','image-track':'图像纹理跟踪','image-track-verified':'图像跟踪＋检测校验',
+    acquired:'检测初始化','image-track':'图像纹理跟踪','image-track-verified':'图像跟踪＋检测校验','image-track-local':'图像跟踪＋局部夹层确认',
     'texture-track-failed':'局部纹理匹配失败','detector-disagreement':'图像跟踪与检测不一致','detection-timeout':'超过一秒未获检测确认','out-of-frame':'目标移出画面'};
   function watch(){if(hasCallbacks&&mode&&callback===null)callback=video.requestVideoFrameCallback(now=>{callback=null;serial++;lastFrameAt=now;watch();});}
   function clear(){tracker.reset();out=null;$('state').textContent='等待重新定位';$('output').textContent='';}
@@ -30,7 +30,8 @@
     const durationMs=performance.now()-start;
     rows.push({mediaTime:mode==='video'?video.currentTime:null,sourceSize:{width:w,height:h},analysisSize:{width,height},durationMs,readbackMs,
       frameSerial:serial,frameAgeMs:performance.now()-lastFrameAt,...out});
-    $('state').textContent=({tracking:'正在跟踪',candidate:'检测候选',unknown:'未知',lost:'丢失'}[out.state])+' · '+reasons[out.reason];
+    // Confirmation is an internal step, not a change of tracking state.
+    $('state').textContent=out.state==='tracking'?'正在跟踪':({candidate:'检测候选',unknown:'未知',lost:'丢失'}[out.state])+' · '+reasons[out.reason];
     $('metrics').textContent=`${durationMs.toFixed(1)} ms／分析 · 有效匹配点 ${out.inlierPoints} · 本段 ${rows.length} 次分析`+
       (out.lastDetectionAgeMs!==null?` · 上次检测确认 ${Math.round(out.lastDetectionAgeMs)} ms 前`:'');
     $('output').textContent=JSON.stringify(out,null,2);draw();
