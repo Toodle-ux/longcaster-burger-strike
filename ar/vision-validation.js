@@ -68,7 +68,7 @@
   $('compare').onchange=()=>{if(mode==='image')analyze(still,false);};
   $('mark').onclick=()=>{marks.push({truth:$('truth').value,recordIndex:rows.length-1,observation:out});$('marks').textContent=marks.length+' 条人工备注';};
   $('export').onclick=()=>{
-    const result={schema:'burger-visual-validation/v1',implementation:'vision-5',source,userAgent:navigator.userAgent,coordinates:'analysis pixels; visual bun anchor, not core',
+    const result={schema:'burger-visual-validation/v1',implementation:'vision-6',source,userAgent:navigator.userAgent,coordinates:'analysis pixels; visual bun anchor, not core',
       camera:stream?.getVideoTracks()[0]?.getSettings()??null,records:rows,marks};
     const blob=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=document.createElement('a');
     a.href=blob;a.download='burger-visual-validation.json';a.click();setTimeout(()=>URL.revokeObjectURL(blob),1000);

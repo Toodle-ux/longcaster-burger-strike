@@ -250,7 +250,15 @@
       }
     }
     const fractions=good.map((v,i)=>v/Math.max(1,total[i]));
-    return {supported:fractions.every(v=>v>=.55),fractions};
+    // A side wall may blend into the background while the top, bottom and
+    // opposite wall remain clear. This exception is only used by the side
+    // proposal, which also requires aligned filling and consecutive detections
+    // before tracking. A missing top/bottom edge cannot use this exception.
+    const strong=fractions.every(v=>v>=.55);
+    const oneWeakSide=fractions[2]>=.65&&fractions[3]>=.65&&
+      Math.min(fractions[0],fractions[1])>=.25&&Math.max(fractions[0],fractions[1])>=.65&&
+      fractions.reduce((s,v)=>s+v,0)/4>=.7;
+    return {supported:strong||oneWeakSide,partialBoundary:!strong&&oneWeakSide,fractions};
   }
   function classify(r,g,b) {
     const hi=Math.max(r,g,b),lo=Math.min(r,g,b),delta=hi-lo,s=delta/Math.max(1,hi);
@@ -660,7 +668,7 @@
     if(!cap)return null;
     const box=bounds(cap.points);
     return {box:{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top},
-      contour:cap.points,sesame:cap.sesame,hasFilling:!!cap.green,method:cap.method??'colour-cap'};
+      contour:cap.points,sesame:cap.sesame,hasFilling:!!cap.green,method:cap.method??'colour-cap',boundary:cap.edge??null};
   }
   // Confirmation only: requires a previously tracked cap box. It neither
   // initializes a target nor infers the hidden core/attackable state.
