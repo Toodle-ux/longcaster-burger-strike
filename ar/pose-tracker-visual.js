@@ -104,6 +104,8 @@
     // Convex completion bridges sesame holes; it is an observed candidate,
     // not a model silhouette or a guaranteed complete segmentation.
     const data=input.data,greens=components(frame,GREEN,5),whites=components(frame,WHITE,1);
+    const side=sideCapObservation(input,frame,selection,greens,whites);
+    if(side)return side;
     // Start broad to retain the orange rim. Tighten only when it merges with
     // the wooden background; a single strict threshold clips the crown and
     // can itself turn an oblique view into a falsely shallow one.
@@ -176,6 +178,79 @@
         Math.abs(frame.gray[inside]-frame.gray[outside])>=18)supported++;
     }
     return supported>=5;
+  }
+  // Side-view proposal: yellow rim and orange crown belong to one silhouette.
+  // Pale holes are allowed inside it, but a coloured rectangle alone is not
+  // evidence: require an observed boundary on all sides and filling below.
+  function sideCapObservation(input,frame,selection,greens,whites){
+    const warm=v=>v===BUN||v===YELLOW,labels=Uint8Array.from(frame.labels,v=>warm(v)?BUN:NONE),candidates=[];
+    const regions=components({...frame,labels},BUN,35).slice(0,30);
+    for(const source of regions){
+      const q={...source},w=q.right-q.left+1;
+      // Warm cheese can touch the crown at its sides. Split only at an
+      // observed dark rim spanning the central width, never a fixed model cut.
+      if(w>=20&&w<=frame.w*.4&&(q.bottom-q.top+1)/w<.6){
+        let previousDark=false;
+        for(let y=q.top+Math.ceil(w*.22);y<=q.bottom;y++){
+          let dark=0,n=0;
+          for(let x=q.left+Math.ceil(w*.15);x<=q.right-w*.15;x++){n++;if(frame.labels[y*frame.w+x]===DARK)dark++;}
+          const isDark=dark/n>=.65;
+          if(isDark&&previousDark){q.bottom=y-2;q.y=(q.top+q.bottom)/2;break;}
+          previousDark=isDark;
+        }
+      }
+      const h=q.bottom-q.top+1;
+      if(w<20||w>frame.w*.4||h/w<.22||h/w>=.6)continue;
+      // A cheese strip under a larger crown is not a second, shallow crown.
+      // Use actual neighbouring components, not an assumed table/horizon.
+      if(regions.some(p=>p!==source&&p.right-p.left+1>=w*.65&&p.right-p.left+1<=w*1.6&&
+        p.bottom-p.top+1>=w*.22&&Math.abs(p.x-q.x)<w*.3&&p.top<q.top-w*.15&&
+        p.bottom<=q.top+w*.15&&q.top-p.bottom<w*.2))continue;
+      if(q.left<4||q.top<4||q.right>=frame.w-4||q.bottom>=frame.h-4)continue;
+      if(selection&&Math.hypot(q.x-selection.x*frame.w,q.y-selection.y*frame.h)>w*1.5)continue;
+      const green=greens.find(g=>g.right-g.left+1>=w*.5&&g.right-g.left+1<=w*1.5&&Math.abs(g.x-q.x)<w*.3&&g.y>q.bottom&&g.y-q.bottom<w*.7);
+      if(!green||!confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported)continue;
+      const points=[];let pale=0,red=0;q.count=0;
+      for(let y=q.top;y<=q.bottom;y++)for(let x=q.left;x<=q.right;x++){
+        const k=y*frame.w+x;
+        if(frame.labels[k]===WHITE)pale++;
+        if(labels[k]===BUN)q.count++;
+        const r=input.data[k*4],g=input.data[k*4+1],b=input.data[k*4+2];
+        if(r>85&&r>g*1.48&&g>b*1.3&&g>32)red++;
+        if(labels[k]===BUN&&(labels[k-1]!==BUN||labels[k+1]!==BUN||labels[k-frame.w]!==BUN||labels[k+frame.w]!==BUN))points.push({x,y});
+      }
+      if(pale<3||red<w*h*.1||(q.count+pale)/(w*h)<.4||points.length<6)continue;
+      const outline=hull(points),sesame=sesameEvidence(frame,q,whites);
+      // A plain rectangular rim is insufficient; retain observed shoulder
+      // segments without imposing a particular dome height at shallow angles.
+      if(outline.length<6)continue;
+      if(sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
+      const edge=sideBoundaryEvidence(input,frame,outline,q);
+      if(!edge.supported)continue;
+      candidates.push({...q,points:outline,width:w,green,sesame,method:'side-outline',edge});
+    }
+    candidates.sort((a,b)=>b.count-a.count);
+    if(candidates.length>1&&candidates[1].count>candidates[0].count*.7)return null;
+    return candidates[0]??null;
+  }
+  function sideBoundaryEvidence(input,frame,outline,box){
+    const w=box.right-box.left+1,h=box.bottom-box.top+1,d=Math.max(2,w*.025),total=[0,0,0,0],good=[0,0,0,0];
+    for(let i=0;i<outline.length;i++){
+      const a=outline[i],b=outline[(i+1)%outline.length],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);
+      const nx=-dy/length,ny=dx/length,steps=Math.max(1,Math.ceil(length/Math.max(3,w*.06)));
+      const side=Math.abs(nx)>Math.abs(ny)?nx>0?0:1:ny>0?2:3;
+      for(let s=0;s<steps;s++){
+        const x=a.x+dx*(s+.5)/steps,y=a.y+dy*(s+.5)/steps;
+        const ix=Math.round(x+nx*d),iy=Math.round(y+ny*d),ox=Math.round(x-nx*d),oy=Math.round(y-ny*d);
+        total[side]++;
+        if(ix<0||iy<0||ox<0||oy<0||ix>=frame.w||ox>=frame.w||iy>=frame.h||oy>=frame.h)continue;
+        const inside=iy*frame.w+ix,outside=oy*frame.w+ox,label=frame.labels[inside];
+        const contrast=Math.hypot(...[0,1,2].map(c=>input.data[inside*4+c]-input.data[outside*4+c]));
+        if((label===BUN||label===YELLOW||label===WHITE)&&contrast>=40)good[side]++;
+      }
+    }
+    const fractions=good.map((v,i)=>v/Math.max(1,total[i]));
+    return {supported:fractions.every(v=>v>=.55),fractions};
   }
   function classify(r,g,b) {
     const hi=Math.max(r,g,b),lo=Math.min(r,g,b),delta=hi-lo,s=delta/Math.max(1,hi);
@@ -585,7 +660,7 @@
     if(!cap)return null;
     const box=bounds(cap.points);
     return {box:{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top},
-      contour:cap.points,sesame:cap.sesame,hasFilling:!!cap.green};
+      contour:cap.points,sesame:cap.sesame,hasFilling:!!cap.green,method:cap.method??'colour-cap'};
   }
   // Confirmation only: requires a previously tracked cap box. It neither
   // initializes a target nor infers the hidden core/attackable state.
