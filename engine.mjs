@@ -15,12 +15,12 @@ export class Mission {
     return true;
   }
   availableSlot(now) { return this.readyAt.findIndex(time => time <= now); }
-  canFire(now) { return this.tracked && !this.destroyed && this.ammo > 0 && this.availableSlot(now) !== -1; }
+  canFire(now) { return this.ammo > 0 && this.availableSlot(now) !== -1; }
   progress(slot, now) { return Math.max(0, Math.min(1, 1 - (this.readyAt[slot] - now) / this.cooldown)); }
   fire(now) {
     if (!this.canFire(now)) return null;
     const slot = this.availableSlot(now);
-    const shot = {id: ++this.sequence, slot, hit: this.exposed};
+    const shot = {id: ++this.sequence, slot, hit: this.tracked && this.exposed && !this.destroyed};
     this.ammo--;
     this.readyAt[slot] = now + this.cooldown;
     this.pending.set(shot.id, shot);
@@ -31,7 +31,7 @@ export class Mission {
     if (!shot) return null;
     this.pending.delete(id);
     // Two missiles can be in flight toward the same core, but it scores once.
-    if (this.destroyed) return null;
+    if (this.destroyed) return shot.hit ? null : 'miss';
     if (!shot.hit) return 'miss';
     this.destroyed = true;
     this.score += 400;

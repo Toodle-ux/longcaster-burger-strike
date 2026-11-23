@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 await import('./coarse-model.js');
-await import('./attack-region.js');
+await import('./attack-region-game.js');
 await import('./pose-tracker-game.js');
 await import('./visual-tracker.js');
 await import('./game-tracker.js');
@@ -10,23 +10,23 @@ const input={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};
 const box={x:60,y:40,width:80,height:40};
 const detection={box,contour:[],sesame:{strong:false}};
 function fixture(){
-  const state={found:true,geometry:true,exposed:true,box:{...box},detection,center:{x:.5,y:.5},elevation:10};
+  const state={found:true,geometry:true,exposed:true,box:{...box},detection,center:{x:.5,y:.5},elevation:10,scale:.02};
   const visual={reset(){},update(){return {targetFound:state.found,state:state.found?'tracking':'lost',reason:'test',targetBounds:state.box};}};
   const geometry={reset(){},update(_,stamp,options){
     state.cap=options.capObservation;
     if(!state.geometry)return BurgerPose.empty(stamp,'weak-model-fit');
     return {...BurgerPose.empty(stamp),tracking:'found',targetFound:true,evidenceTimestampMs:stamp,
-      pose:{center:{...state.center},scalePerSourceWidth:.02,elevationDegrees:state.elevation,rollDegrees:0},
+      pose:{center:{...state.center},scalePerSourceWidth:state.scale,elevationDegrees:state.elevation,rollDegrees:0},
       coreCenter:{x:.5,y:.5},coreBounds:{x:.48,y:.48,width:.04,height:.04},
-      attackRegion:{center:{x:.5,y:.5},radiusMm:2,radiusX:.04,radiusY:.04},
+      attackRegion:{center:{x:.5,y:.5},radiusMm:2,radiusX:state.scale*2,radiusY:state.scale*2},
       modelAttackability:state.exposed?'exposed':'blocked',reason:'current-model-fit'};
   }};
   return {state,tracker:new BurgerGameTracker.Tracker({visual,geometry,detect:()=>state.detection})};
 }
-test('game adapter preserves core offset and exposure while using the visual anchor',()=>{
+test('game adapter keeps the fresh model on its contour even when the texture ROI differs',()=>{
   const {state,tracker}=fixture();state.box={...box,x:70};
   const r=tracker.update(input,0);
-  assert.equal(r.tracking,'found');assert.deepEqual(r.coreCenter,{x:.55,y:.5});
+  assert.equal(r.tracking,'found');assert.deepEqual(r.coreCenter,{x:.5,y:.5});
   assert.notEqual(r.coreCenter.y,(state.box.y+state.box.height/2)/input.height);
   assert.equal(r.modelAttackability,'unknown');assert.equal(r.attackRegion.radiusMm,2);
   assert.deepEqual(r.attackRegion.center,r.coreCenter);assert.equal(r.evidenceTimestampMs,0);
@@ -68,7 +68,8 @@ test('uncertainty revokes attacks immediately and interrupts exposure confirmati
 
 test('image translation and zoom follow immediately without a false core branch change',()=>{
   const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);tracker.update(input,180);
-  state.box={x:64,y:36,width:96,height:48};const r=tracker.update(input,220);
+  state.box={x:64,y:36,width:96,height:48};state.detection={...detection,box:state.box};
+  state.center={x:.56,y:.54};state.scale=.024;const r=tracker.update(input,220);
   assert.equal(r.modelAttackability,'exposed');assert.equal(r.coreCenter.x,.56);
   assert.equal(r.coreCenter.y,.54);assert.equal(r.attackRegion.radiusX,.048);
 });

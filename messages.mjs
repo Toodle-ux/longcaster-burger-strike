@@ -216,21 +216,21 @@ export const messages = {
     "追跡を利用できません。ページを開き直してください",
     "Tracking unavailable. Please reopen the page"
   ],
-  "视频已暂停 · 暂停攻击": [
-    "動画を一時停止中 · 攻撃不可",
-    "Video paused · attacks paused"
+  "视频已暂停 · 无法命中": [
+    "動画を一時停止中 · 命中不可",
+    "Video paused · hits disabled"
   ],
-  "核心露出 · 可攻击": [
-    "コア露出 · 攻撃可能",
-    "Core exposed · ready to attack"
+  "核心露出 · 可命中": [
+    "コア露出 · 命中可能",
+    "Core exposed · hit possible"
   ],
   "面包遮挡 · 请降低视角": [
     "バンズで遮蔽 · 視点を下げてください",
     "Bun occlusion · lower your viewpoint"
   ],
-  "短时保留位置 · 暂停攻击": [
-    "直前の位置を保持 · 攻撃不可",
-    "Last position retained · attacks paused"
+  "短时保留位置 · 无法命中": [
+    "直前の位置を保持 · 命中不可",
+    "Last position retained · hits disabled"
   ],
   "角度不确定 · 请缓慢移动手机": [
     "角度不確定 · ゆっくり端末を動かしてください",
@@ -296,13 +296,13 @@ export const messages = {
     "フレーム期限切れ {frames} 回 · 結果期限切れ {results} 回",
     "Frame timeouts {frames} · expired results {results}"
   ],
-  "当前结果已过期，不可攻击": [
-    "結果が期限切れのため攻撃不可",
-    "Result expired; attacks disabled"
+  "当前结果已过期，无法命中": [
+    "結果が期限切れのため命中不可",
+    "Result expired; hits disabled"
   ],
-  "当前画面已超时，不可攻击": [
-    "フレームが期限切れのため攻撃不可",
-    "Frame expired; attacks disabled"
+  "当前画面已超时，无法命中": [
+    "フレームが期限切れのため命中不可",
+    "Frame expired; hits disabled"
   ],
   "目标已确认。准备好就开火。": [
     "ターゲット確認。準備できたら発射。",

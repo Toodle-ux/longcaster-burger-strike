@@ -361,30 +361,44 @@
     const fraction=sum.map((v,i)=>v/(count[i]||1));
     const weights=[.23,.34,.35,.08];let score=0,total=0;
     for(let i=0;i<4;i++)if(count[i]){score+=fraction[i]*weights[i];total+=weights[i];}
-    let contourError=null,contourMaxError=null;
+    let contourError=null,contourMaxError=null,capHeightError=null;
     score=score/total-(count[1]<3?.4:0);
     if(frame.cap){
       const projected=template.upperHull.map(q=>({x:p.x+p.scale*(q.x*c+q.y*s),y:p.y+p.scale*(-q.x*s+q.y*c)}));
       const observed=frame.cap.points;
+      const aBox=bounds(projected),bBox=bounds(observed);
+      capHeightError=Math.abs((aBox.bottom-aBox.top)-(bBox.bottom-bBox.top))/frame.cap.width;
       const a=observed.map(q=>edgeDistance(q,projected)),b=projected.map(q=>edgeDistance(q,observed));
       contourError=(a.reduce((s,x)=>s+x,0)/a.length+b.reduce((s,x)=>s+x,0)/b.length)/(2*frame.cap.width);
       contourMaxError=Math.max(...a,...b)/frame.cap.width;
       score=.45*score+.55*Math.max(0,1-contourError*8);
     }
-    return {score,contourError,contourMaxError,upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
+    return {score,contourError,contourMaxError,capHeightError,upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
+  }
+  // The detected cap fixes translation and scale for EACH orientation. Colour
+  // evidence may select a view, but cannot slide/shrink the model off the bun.
+  function alignCap(frame,p) {
+    if(!frame.table||!frame.cap)return p;
+    const c=Math.cos(p.roll*DEG),s=Math.sin(p.roll*DEG);
+    const box=bounds(templateOf(p).upperHull.map(q=>({x:q.x*c+q.y*s,y:-q.x*s+q.y*c})));
+    const observed=bounds(frame.cap.points),scale=(observed.right-observed.left)/(box.right-box.left);
+    return {...p,scale,x:(observed.left+observed.right-scale*(box.left+box.right))/2,
+      y:(observed.top+observed.bottom-scale*(box.top+box.bottom))/2};
   }
   function refine(frame,start,previous,dtMs) {
-    let p={...start},e=evaluate(frame,p);
+    let p=alignCap(frame,{...start}),e=evaluate(frame,p);
     let score=merit(p,e,previous,dtMs);
     const diameter=p.scale*geometry.fillingDiameter;
     for(const fraction of [1,.5])for(let pass=0;pass<2;pass++) {
       for(const [key,step] of [['x',Math.max(1,diameter*.07)*fraction],['y',Math.max(1,diameter*.07)*fraction],['scale',p.scale*.07*fraction],['roll',6*fraction],['t',1]]) {
+        if(frame.table&&['x','y','scale'].includes(key))continue;
         if(frame.attitude?.used&&(key==='roll'||key==='t'))continue;
         let best=p,bestEvidence=e,bestScore=score;
         for(const sign of [-1,1]) {
-          const q={...p,[key]:p[key]+sign*step};q.roll=wrap(q.roll);
+          let q={...p,[key]:p[key]+sign*step};q.roll=wrap(q.roll);
           if(q.t<0||q.t>=templates.length||q.scale<.55||q.scale>frame.w/28)continue;
           if(frame.table&&!frame.attitude?.used&&(q.t<7||Math.abs(q.roll)>45))continue;
+          q=alignCap(frame,q);
           const qe=evaluate(frame,q),qs=merit(q,qe,previous,dtMs);
           if(qs>bestScore){best=q;bestEvidence=qe;bestScore=qs;}
         }
@@ -557,7 +571,7 @@
       // Keep distinct position/orientation hypotheses; nearby pixels alone do
       // not establish which surface is in front of the hidden geometric centre.
       const prior=frame.table?null:reference;
-      const ranked=hypotheses.map(p=>({...p,e:evaluate(frame,p)})).sort((a,b)=>merit(b,b.e,prior,dtMs)-merit(a,a.e,prior,dtMs));
+      const ranked=hypotheses.map(p=>alignCap(frame,p)).map(p=>({...p,e:evaluate(frame,p)})).sort((a,b)=>merit(b,b.e,prior,dtMs)-merit(a,a.e,prior,dtMs));
       // Always refine the previous model too; a tiny isolated green patch must
       // not evict it from the short list before continuity can be considered.
       const starts=reference?[motion??reference]:[];
@@ -569,8 +583,10 @@
       const isSupported=q=>{
         if(frame.table){
           const layered=q.e.greens>=2&&q.e.darks>=2;
+          // Ten-degree templates differ by up to .11 bun widths in height;
+          // allow half a step plus pixel rounding, without freeing translation.
           const top=frame.cap.sesame.strong&&templateOf(q).elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
-          return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.upper>.45&&(layered||top);
+          return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.capHeightError<.065&&q.e.upper>.45&&(layered||top);
         }
         const freshTop=hypotheses.some(p=>p.freshTop&&Math.hypot(p.x-q.x,p.y-q.y)<q.scale*8&&Math.abs(Math.log(p.scale/q.scale))<.3);
         // A small upside-down model on one green leaf can score highly. Require

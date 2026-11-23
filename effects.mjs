@@ -39,9 +39,9 @@ export function createEffects(canvas, target, reduced) {
     }
     if (effects.length) frame=requestAnimationFrame(animate);
   }
-  function launch(shot) {
+  function launch(shot, hasTarget=true) {
     const rect=canvas.getBoundingClientRect(), aim=target.getBoundingClientRect();
-    effects.push({...shot, begin:performance.now(), x:(aim.left+aim.width/2-rect.left)/rect.width, y:(aim.top+aim.height/2-rect.top)/rect.height});
+    effects.push({...shot, begin:performance.now(), x:hasTarget?(aim.left+aim.width/2-rect.left)/rect.width:.5, y:hasTarget?(aim.top+aim.height/2-rect.top)/rect.height:.25});
     cancelAnimationFrame(frame);
     frame=requestAnimationFrame(animate);
   }

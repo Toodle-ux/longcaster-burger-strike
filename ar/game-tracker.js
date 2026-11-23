@@ -1,5 +1,5 @@
-/* Game integration: vision-6 supplies image position/scale; the coarse model
- * still supplies the internal core offset and geometric exposure. Load model,
+/* Game integration: vision-6 supplies identity and short display motion;
+ * the CURRENT cap contour anchors the whole model and its fixed core. Load model,
  * attack-region, pose-tracker and visual-tracker before this module.
  * Visual acquisition alone never grants attacks. Current pose fits use only
  * CURRENT detector contours, never a propagated silhouette. No IMU required.
@@ -53,8 +53,11 @@
         visual,geometryState:fit.reason,integration:'vision-6-game',
         stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry'}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
-        const pose=relocate(fit.pose,observation.box,visual.targetBounds,input.width,input.height);
-        const local=localPose(pose,visual.targetBounds,input.width,input.height);
+        // The texture ROI preserves its acquisition aspect ratio. It is NOT
+        // the current bun silhouette after a view change: reanchoring a fresh
+        // model to that ROI displaces its core and breaks model/image alignment.
+        const pose=fit.pose;
+        const local=localPose(pose,observation.box,input.width,input.height);
         // An isolated competing pose cannot move the core or renew its hold.
         // A genuine new view is accepted after consistent CURRENT evidence.
         let accepted=!this.anchor||agrees(local,this.anchor.local);
@@ -68,7 +71,6 @@
         result.stabilization={rawState:fit.modelAttackability,
           reason:accepted?'current-geometry':'confirming-core',pendingFrames:this.pendingPose?.count??0};
         if(accepted){
-          const ratio=visual.targetBounds.width/observation.box.width;
           this.anchor={pose,local,box:{...visual.targetBounds},time:timestampMs};this.pendingPose=null;
           // Revocation is immediate. Reacquiring permission needs a continuous
           // run of exposed evidence; display holds never contribute to this run.
@@ -79,12 +81,8 @@
             timestampMs-this.exposure.since>=CONFIRM_MS;
           const state=fit.modelAttackability==='exposed'&&!exposedReady?'unknown':fit.modelAttackability;
           if(fit.modelAttackability==='exposed'&&!exposedReady)result.stabilization.reason='confirming-exposure';
-          const bounds=fit.coreBounds?{x:pose.center.x-fit.coreBounds.width*ratio/2,
-            y:pose.center.y-fit.coreBounds.height*ratio/2,width:fit.coreBounds.width*ratio,height:fit.coreBounds.height*ratio}:null;
-          const region=fit.attackRegion?{...fit.attackRegion,center:{...pose.center},
-            radiusX:fit.attackRegion.radiusX*ratio,radiusY:fit.attackRegion.radiusY*ratio}:null;
-          return {...result,pose,coreCenter:pose.center,coreBounds:bounds,attackRegion:region,modelAttackability:state,
-            displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'visual-anchor'};
+          return {...result,pose,coreCenter:pose.center,modelAttackability:state,
+            displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'current-contour'};
         }
       } else {
         this.pendingPose=null;

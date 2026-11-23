@@ -1,12 +1,12 @@
-import {t,getLanguage,setupLanguages} from './i18n.mjs?v=12';
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=13';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=12';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=13';
 import './ar/core-display.js?v=10';
 import {createAudio} from './audio.mjs?v=9';
-import {setupOrientation} from './orientation.mjs?v=12';
-import {Mission} from './engine.mjs?v=4';
-import {setupLocalVideo} from './local-video.mjs?v=12';
-import {createEffects} from './effects.mjs?v=4';
+import {setupOrientation} from './orientation.mjs?v=13';
+import {Mission} from './engine.mjs?v=13';
+import {setupLocalVideo} from './local-video.mjs?v=13';
+import {createEffects} from './effects.mjs?v=13';
 const $ = id => document.getElementById(id);
 const game = new Mission();
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -73,7 +73,7 @@ function applyRecognition(observation) {
   const measuredVisible=!!projectedCore({...observation,displayPose:result?.coreCenter?{center:result.coreCenter}:null});
   game.tracked=measuredVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
   const visualLocated=observation.diagnostics?.live&&observation.diagnostics.resultAgeMs<=250&&observation.diagnostics.frameAgeMs<=250&&result?.visual?.targetFound;
-  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):visualLocated?'汉堡已定位 · 核心待确认':'寻找汉堡 · 请保持完整入镜';
+  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 无法命中':state==='exposed'?'核心露出 · 可命中':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 无法命中':'角度不确定 · 请缓慢移动手机'):visualLocated?'汉堡已定位 · 核心待确认':'寻找汉堡 · 请保持完整入镜';
   $('recognition-status').textContent=t('桌面实验识别 · {message}',{message:t(message)});
   $('tracking-hint').textContent=t(game.destroyed?'核心已击破 · 重置后再试':message);
   render();
@@ -92,7 +92,7 @@ function renderCooldown() {
   const ready=game.readyAt.filter(time => time<=now).length;
   const status=t('导弹就绪 {ready}/2',{ready});
   if ($('reload-status').textContent!==status) $('reload-status').textContent=status;
-  $('fire').lastElementChild.textContent=t(game.destroyed?'目标已击破':!game.tracked?'等待确认目标':!game.ammo?'弹药耗尽':!ready?'装填中':'发射导弹');
+  $('fire').lastElementChild.textContent=t(!game.ammo?'弹药耗尽':!ready?'装填中':'发射导弹');
 }
 function render() {
   $('ammo').textContent=String(game.ammo).padStart(2,'0');
@@ -128,7 +128,7 @@ function renderDiagnostics(d) {
     t('像素读取 {read} · 识别计算 {compute}',{read:ms(d.readbackMs),compute:ms(d.processingMs)}),
     t('计算往返 {roundtrip} · 结果年龄 {age}',{roundtrip:ms(d.turnaroundMs),age:ms(d.resultAgeMs)}),
     t('画面超时 {frames} 次 · 结果过期 {results} 次',{frames:d.frameStaleEvents,results:d.resultExpiredEvents}),
-    t(d.resultExpired?'当前结果已过期，不可攻击':d.frameStale?'当前画面已超时，不可攻击':''),
+    t(d.resultExpired?'当前结果已过期，无法命中':d.frameStale?'当前画面已超时，无法命中':''),
   ].filter(Boolean).join('\n');
 }
 function enter() {
@@ -177,7 +177,7 @@ function fire() {
   feedback();
   say('导弹发射。');
   audio.effect('launch');
-  render(); effects.launch(shot);
+  render(); effects.launch(shot, game.tracked && targetVisible && !game.destroyed);
   const timer=setTimeout(() => {
     shotTimers.delete(timer);
     applyRecognition(recognitionController.current());

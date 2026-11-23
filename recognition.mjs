@@ -1,6 +1,6 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
-export const RUNTIME_RELEASE='v12';
+export const RUNTIME_RELEASE='v13';
 export function permission(result,age) {
   if(!result||age<0||age>MAX_EVIDENCE_AGE||result.tracking!=='found'||!result.targetFound||
     !result.coreCenter||!result.attackRegion||result.evidenceTimestampMs!==result.timestampMs)return 'unknown';
@@ -42,7 +42,7 @@ export function setupRecognition({getSource,onResult}) {
     if(records.length>3600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/game-worker.js?v=12',import.meta.url));
+    worker=new Worker(new URL('./ar/game-worker.js?v=13',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;
@@ -60,7 +60,7 @@ export function setupRecognition({getSource,onResult}) {
         evidenceAgeMs:finite(observation(result,turnaroundMs,0).evidenceAgeMs),displayMotion:result.displayMotion,
         coreCenter:result.coreCenter,displayPoseCenter:result.displayPose?.center??null,
         pose:result.pose,elevationRangeDegrees:result.elevationRangeDegrees,
-        debug:{candidates:result.debug?.candidates??[]}});
+        debug:{fit:result.debug?.fit,centerSurface:result.modelCenterSurface,candidates:result.debug?.candidates??[]}});
       publish();
     };
     worker.onerror=()=>{failed=true;pending=null;result=null;record('worker-error');publish();};
