@@ -10,13 +10,13 @@ const input={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};
 const box={x:60,y:40,width:80,height:40};
 const detection={box,contour:[],sesame:{strong:false}};
 function fixture(){
-  const state={found:true,geometry:true,exposed:true,box:{...box},detection};
+  const state={found:true,geometry:true,exposed:true,box:{...box},detection,center:{x:.5,y:.5},elevation:10};
   const visual={reset(){},update(){return {targetFound:state.found,state:state.found?'tracking':'lost',reason:'test',targetBounds:state.box};}};
   const geometry={reset(){},update(_,stamp,options){
     state.cap=options.capObservation;
     if(!state.geometry)return BurgerPose.empty(stamp,'weak-model-fit');
     return {...BurgerPose.empty(stamp),tracking:'found',targetFound:true,evidenceTimestampMs:stamp,
-      pose:{center:{x:.5,y:.5},scalePerSourceWidth:.02,elevationDegrees:10,rollDegrees:0},
+      pose:{center:{...state.center},scalePerSourceWidth:.02,elevationDegrees:state.elevation,rollDegrees:0},
       coreCenter:{x:.5,y:.5},coreBounds:{x:.48,y:.48,width:.04,height:.04},
       attackRegion:{center:{x:.5,y:.5},radiusMm:2,radiusX:.04,radiusY:.04},
       modelAttackability:state.exposed?'exposed':'blocked',reason:'current-model-fit'};
@@ -28,9 +28,56 @@ test('game adapter preserves core offset and exposure while using the visual anc
   const r=tracker.update(input,0);
   assert.equal(r.tracking,'found');assert.deepEqual(r.coreCenter,{x:.55,y:.5});
   assert.notEqual(r.coreCenter.y,(state.box.y+state.box.height/2)/input.height);
-  assert.equal(r.modelAttackability,'exposed');assert.equal(r.attackRegion.radiusMm,2);
+  assert.equal(r.modelAttackability,'unknown');assert.equal(r.attackRegion.radiusMm,2);
   assert.deepEqual(r.attackRegion.center,r.coreCenter);assert.equal(r.evidenceTimestampMs,0);
-  state.exposed=false;assert.equal(tracker.update(input,33).modelAttackability,'blocked');
+  tracker.update(input,90);assert.equal(tracker.update(input,180).modelAttackability,'exposed');
+  state.exposed=false;assert.equal(tracker.update(input,200).modelAttackability,'blocked');
+});
+
+test('a core branch jump is held without permission; repeated new evidence accepts a real view change',()=>{
+  const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);tracker.update(input,180);
+  state.center={x:.65,y:.5};state.elevation=50;
+  let r=tracker.update(input,230);
+  assert.equal(r.coreCenter,null);assert.equal(r.modelAttackability,'unknown');
+  assert.equal(r.displayPose.center.x,.5);assert.equal(r.evidenceTimestampMs,180);
+  tracker.update(input,320);r=tracker.update(input,410);
+  assert.equal(r.coreCenter.x,.65);assert.equal(r.modelAttackability,'unknown');
+  tracker.update(input,500);assert.equal(tracker.update(input,590).modelAttackability,'exposed');
+});
+
+test('alternating core estimates cannot move or indefinitely renew a held marker',()=>{
+  const {state,tracker}=fixture();state.exposed=false;tracker.update(input,0);
+  let r;
+  for(let time=50;time<=550;time+=50){
+    state.center={x:time%100?.65:.35,y:.5};r=tracker.update(input,time);
+    assert.equal(r.coreCenter,null);assert.equal(r.modelAttackability,'unknown');
+    if(time<500)assert.equal(r.displayPose.center.x,.5);
+  }
+  assert.equal(r.displayPose,null);assert.equal(r.evidenceTimestampMs,null);
+});
+
+test('uncertainty revokes attacks immediately and interrupts exposure confirmation',()=>{
+  const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);
+  assert.equal(tracker.update(input,180).modelAttackability,'exposed');
+  state.geometry=false;assert.equal(tracker.update(input,200).modelAttackability,'unknown');
+  state.geometry=true;assert.equal(tracker.update(input,250).modelAttackability,'unknown');
+  tracker.update(input,340);assert.equal(tracker.update(input,430).modelAttackability,'exposed');
+  state.exposed=false;assert.equal(tracker.update(input,450).modelAttackability,'blocked');
+  state.exposed=true;assert.equal(tracker.update(input,500).modelAttackability,'unknown');
+});
+
+test('image translation and zoom follow immediately without a false core branch change',()=>{
+  const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);tracker.update(input,180);
+  state.box={x:64,y:36,width:96,height:48};const r=tracker.update(input,220);
+  assert.equal(r.modelAttackability,'exposed');assert.equal(r.coreCenter.x,.56);
+  assert.equal(r.coreCenter.y,.54);assert.equal(r.attackRegion.radiusX,.048);
+});
+
+test('a single exposed frame between blocked observations never enables attacks',()=>{
+  const {state,tracker}=fixture();state.exposed=false;tracker.update(input,0);
+  state.exposed=true;assert.equal(tracker.update(input,50).modelAttackability,'unknown');
+  state.exposed=false;assert.equal(tracker.update(input,100).modelAttackability,'blocked');
+  state.exposed=true;assert.equal(tracker.update(input,150).modelAttackability,'unknown');
 });
 test('visual recognition alone and mismatched detections cannot grant a core or an attack',()=>{
   const {state,tracker}=fixture();state.geometry=false;

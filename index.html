@@ -47,7 +47,7 @@
   <section id="mission" hidden aria-label="模拟攻击任务">
     <div class="telemetry"><div>SCORE <span id="score">000000</span></div><div>TARGET CORE <span>+400</span></div></div>
     <div class="radio"><span>AWACS Longcaster</span><p><b>≪</b> <span id="radio-text">目标已确认。准备好就开火。</span> <b>≫</b></p></div>
-    <span class="prototype-label">TABLETOP TEST / 11</span><button id="mission-audio-toggle" class="audio-toggle" aria-pressed="false">声音关闭 · 点此开启</button>
+    <span class="prototype-label">TABLETOP TEST / 12</span><button id="mission-audio-toggle" class="audio-toggle" aria-pressed="false">声音关闭 · 点此开启</button>
     <svg class="flight-hud" viewBox="0 0 320 300" aria-label="手机姿态刻度">
       <defs><filter id="hud-green" x="-10%" y="-10%" width="120%" height="120%"><feFlood flood-color="#9df5a4"/><feComposite in2="SourceAlpha" operator="in"/></filter><clipPath id="ladder-clip"><rect x="42" y="28" width="236" height="244"/></clipPath></defs>
       <image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240"/><image class="hud-texture" href="./assets/hud/hud_pitch_mark_side.png" x="38" y="30" width="12" height="240" transform="translate(320 0) scale(-1 1)"/>
@@ -89,5 +89,5 @@
 <section id="orientation-prompt" class="permission-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="orientation-title">
     <div class="permission-card"><small>FLIGHT HUD / ATTITUDE</small><h2 id="orientation-title">让 HUD 跟着手机倾斜</h2><p>摄像头已开启。开启姿态感应后，刻度会随手机左右倾斜、抬起和放低而变化。</p><button id="orientation-allow" class="blue-button">开启姿态感应</button><button id="orientation-skip" class="text-button">暂时跳过，使用静态 HUD</button></div>
   </section>
-</main><script type="module" src="./app.js?v=11"></script>
+</main><script type="module" src="./app.js?v=12"></script>
 </body></html>

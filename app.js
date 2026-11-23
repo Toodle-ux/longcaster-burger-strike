@@ -1,11 +1,11 @@
-import {t,getLanguage,setupLanguages} from './i18n.mjs?v=11';
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=12';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=11';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=12';
 import './ar/core-display.js?v=10';
 import {createAudio} from './audio.mjs?v=9';
-import {setupOrientation} from './orientation.mjs?v=11';
+import {setupOrientation} from './orientation.mjs?v=12';
 import {Mission} from './engine.mjs?v=4';
-import {setupLocalVideo} from './local-video.mjs?v=11';
+import {setupLocalVideo} from './local-video.mjs?v=12';
 import {createEffects} from './effects.mjs?v=4';
 const $ = id => document.getElementById(id);
 const game = new Mission();

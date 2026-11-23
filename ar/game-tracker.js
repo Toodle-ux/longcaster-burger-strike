@@ -16,6 +16,16 @@
     return {...pose,center:{x:(b.x+(pose.center.x*width-a.x)*scale)/width,
       y:(b.y+(pose.center.y*height-a.y)*scale)/height},scalePerSourceWidth:pose.scalePerSourceWidth*scale};
   }
+  // Compare geometry in bun-local coordinates: real image translation/zoom
+  // must not be mistaken for a changing internal core estimate.
+  function localPose(pose,box,width,height){
+    const c=center(box);
+    return {x:(pose.center.x*width-c.x)/box.width,y:(pose.center.y*height-c.y)/box.width,
+      scale:pose.scalePerSourceWidth*width/box.width,elevation:pose.elevationDegrees};
+  }
+  const agrees=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<=.06&&
+    Math.abs(Math.log(a.scale/b.scale))<=.15&&Math.abs(a.elevation-b.elevation)<=10;
+  const CONFIRM_MS=180,CONFIRM_FRAMES=3;
   class Tracker {
     constructor({detect=input=>globalThis.BurgerPose.detectCap(input),visual=null,geometry=null}={}){
       this.detect=detect;
@@ -23,7 +33,8 @@
       this.geometry=geometry??new globalThis.BurgerPose.Tracker({mode:'table'});
       this.reset();
     }
-    reset(){this.visual.reset();this.geometry.reset();this.anchor=null;this.lastTime=-Infinity;this.size='';}
+    reset(){this.visual.reset();this.geometry.reset();this.anchor=null;this.pendingPose=null;
+      this.exposure=null;this.lastTime=-Infinity;this.size='';}
     observe(){if(this.detection===undefined)this.detection=this.detect(this.input);return this.detection;}
     update(input,timestampMs){
       const size=input.width+'x'+input.height;
@@ -33,24 +44,52 @@
       const base=globalThis.BurgerPose.empty(timestampMs,visual.reason);
       if(!visual.targetFound){
         // Do not retain a core over a different reacquired object.
-        this.geometry.reset();this.anchor=null;
+        this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;
         return {...base,visual,geometryState:'not-evaluated',integration:'vision-6-game'};
       }
       const observation=this.observe(),matched=observation&&sameTarget(visual.targetBounds,observation.box);
       const fit=this.geometry.update(input,timestampMs,{capObservation:matched?observation:null});
       const result={...fit,displayPose:null,displayStatus:'none',displayOpacity:0,
-        visual,geometryState:fit.reason,integration:'vision-6-game'};
+        visual,geometryState:fit.reason,integration:'vision-6-game',
+        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry'}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
         const pose=relocate(fit.pose,observation.box,visual.targetBounds,input.width,input.height);
-        const ratio=visual.targetBounds.width/observation.box.width;
-        this.anchor={pose,box:{...visual.targetBounds},time:timestampMs};
-        const bounds=fit.coreBounds?{x:pose.center.x-fit.coreBounds.width*ratio/2,
-          y:pose.center.y-fit.coreBounds.height*ratio/2,width:fit.coreBounds.width*ratio,height:fit.coreBounds.height*ratio}:null;
-        const region=fit.attackRegion?{...fit.attackRegion,center:{...pose.center},
-          radiusX:fit.attackRegion.radiusX*ratio,radiusY:fit.attackRegion.radiusY*ratio}:null;
-        return {...result,pose,coreCenter:pose.center,coreBounds:bounds,attackRegion:region,
-          displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'visual-anchor'};
+        const local=localPose(pose,visual.targetBounds,input.width,input.height);
+        // An isolated competing pose cannot move the core or renew its hold.
+        // A genuine new view is accepted after consistent CURRENT evidence.
+        let accepted=!this.anchor||agrees(local,this.anchor.local);
+        if(accepted)this.pendingPose=null;
+        else {
+          if(!this.pendingPose||!agrees(local,this.pendingPose.local))
+            this.pendingPose={local,since:timestampMs,count:0};
+          this.pendingPose.count++;
+          accepted=this.pendingPose.count>=CONFIRM_FRAMES&&timestampMs-this.pendingPose.since>=CONFIRM_MS;
+        }
+        result.stabilization={rawState:fit.modelAttackability,
+          reason:accepted?'current-geometry':'confirming-core',pendingFrames:this.pendingPose?.count??0};
+        if(accepted){
+          const ratio=visual.targetBounds.width/observation.box.width;
+          this.anchor={pose,local,box:{...visual.targetBounds},time:timestampMs};this.pendingPose=null;
+          // Revocation is immediate. Reacquiring permission needs a continuous
+          // run of exposed evidence; display holds never contribute to this run.
+          if(fit.modelAttackability==='exposed'){
+            this.exposure??={since:timestampMs,count:0};this.exposure.count++;
+          } else this.exposure=null;
+          const exposedReady=this.exposure&&this.exposure.count>=CONFIRM_FRAMES&&
+            timestampMs-this.exposure.since>=CONFIRM_MS;
+          const state=fit.modelAttackability==='exposed'&&!exposedReady?'unknown':fit.modelAttackability;
+          if(fit.modelAttackability==='exposed'&&!exposedReady)result.stabilization.reason='confirming-exposure';
+          const bounds=fit.coreBounds?{x:pose.center.x-fit.coreBounds.width*ratio/2,
+            y:pose.center.y-fit.coreBounds.height*ratio/2,width:fit.coreBounds.width*ratio,height:fit.coreBounds.height*ratio}:null;
+          const region=fit.attackRegion?{...fit.attackRegion,center:{...pose.center},
+            radiusX:fit.attackRegion.radiusX*ratio,radiusY:fit.attackRegion.radiusY*ratio}:null;
+          return {...result,pose,coreCenter:pose.center,coreBounds:bounds,attackRegion:region,modelAttackability:state,
+            displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'visual-anchor'};
+        }
+      } else {
+        this.pendingPose=null;
       }
+      this.exposure=null;
       // Image-supported short display only. Its age is measured from the last
       // geometry result and is never renewed by texture tracking or holding.
       const age=this.anchor?timestampMs-this.anchor.time:Infinity;

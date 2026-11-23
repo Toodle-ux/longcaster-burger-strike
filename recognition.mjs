@@ -1,6 +1,6 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
-export const RUNTIME_RELEASE='v11';
+export const RUNTIME_RELEASE='v12';
 export function permission(result,age) {
   if(!result||age<0||age>MAX_EVIDENCE_AGE||result.tracking!=='found'||!result.targetFound||
     !result.coreCenter||!result.attackRegion||result.evidenceTimestampMs!==result.timestampMs)return 'unknown';
@@ -42,7 +42,7 @@ export function setupRecognition({getSource,onResult}) {
     if(records.length>3600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/game-worker.js?v=11',import.meta.url));
+    worker=new Worker(new URL('./ar/game-worker.js?v=12',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;
@@ -51,7 +51,7 @@ export function setupRecognition({getSource,onResult}) {
       processingMs=data.processingMs;turnaroundMs=performance.now()-capturedAt;
       const visual=result.visual;
       record('result',{tracking:result.tracking,geometry:result.modelAttackability,reason:result.reason,
-        geometryState:result.geometryState,integration:result.integration,analysisSize:job.analysisSize,
+        stabilization:result.stabilization,geometryState:result.geometryState,integration:result.integration,analysisSize:job.analysisSize,
         frameAgeMs:finite(performance.now()-lastFrameAt),
         visual:visual?{state:visual.state,reason:visual.reason,targetFound:visual.targetFound,
           anchor:visual.anchor,targetBounds:visual.targetBounds,inlierPoints:visual.inlierPoints,
