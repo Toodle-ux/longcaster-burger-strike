@@ -1,6 +1,6 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
-export const RUNTIME_RELEASE='v10';
+export const RUNTIME_RELEASE='v11';
 export function permission(result,age) {
   if(!result||age<0||age>MAX_EVIDENCE_AGE||result.tracking!=='found'||!result.targetFound||
     !result.coreCenter||!result.attackRegion||result.evidenceTimestampMs!==result.timestampMs)return 'unknown';
@@ -39,17 +39,24 @@ export function setupRecognition({getSource,onResult}) {
     records.push({event,timeMs:finite(performance.now()),source:type,mediaTime:finite(video?.currentTime),
       frameIntervalMs:finite(frameIntervalMs),mediaIntervalMs:finite(mediaIntervalMs),presentedFramesDelta,
       processingMs:finite(processingMs),readbackMs:finite(readbackMs),turnaroundMs:finite(turnaroundMs),...extra});
-    if(records.length>600)records.shift();
+    if(records.length>3600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/worker.js?v=10',import.meta.url));
+    worker=new Worker(new URL('./ar/game-worker.js?v=11',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;
       if(data.error){result=null;record('analysis-error');publish();return;}
       result=data.result;capturedAt=job.capturedAt;readbackMs=job.readbackMs;
       processingMs=data.processingMs;turnaroundMs=performance.now()-capturedAt;
+      const visual=result.visual;
       record('result',{tracking:result.tracking,geometry:result.modelAttackability,reason:result.reason,
+        geometryState:result.geometryState,integration:result.integration,analysisSize:job.analysisSize,
+        frameAgeMs:finite(performance.now()-lastFrameAt),
+        visual:visual?{state:visual.state,reason:visual.reason,targetFound:visual.targetFound,
+          anchor:visual.anchor,targetBounds:visual.targetBounds,inlierPoints:visual.inlierPoints,
+          lastDetectionAgeMs:visual.lastDetectionAgeMs,
+          detection:visual.detection?{method:visual.detection.method,boundary:visual.detection.boundary}:null}:null,
         evidenceAgeMs:finite(observation(result,turnaroundMs,0).evidenceAgeMs),displayMotion:result.displayMotion,
         coreCenter:result.coreCenter,displayPoseCenter:result.displayPose?.center??null,
         pose:result.pose,elevationRangeDegrees:result.elevationRangeDegrees,
@@ -122,7 +129,7 @@ export function setupRecognition({getSource,onResult}) {
     changeSource();const now=performance.now();
     if(type!=='demo'&&video&&video.readyState>=2&&!video.paused&&!video.seeking&&!video.ended&&!document.hidden) {
       if(!usesFrameCallbacks&&video.currentTime!==lastMediaTime)observeFrame(now,video.currentTime);
-      if(frameSerial!==analyzedSerial&&Number.isFinite(lastFrameAt)&&!pending&&!failed&&now-lastCapture>=100) {
+      if(frameSerial!==analyzedSerial&&Number.isFinite(lastFrameAt)&&!pending&&!failed&&now-lastCapture>=50) {
         const stamp=type==='video'?video.currentTime*1000:now;
         if(stamp<=lastStamp||stamp-lastStamp>DISPLAY_HOLD_MS&&Number.isFinite(lastStamp)) {
           generation++;result=null;
@@ -133,13 +140,13 @@ export function setupRecognition({getSource,onResult}) {
           if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
           try {
             const start=performance.now();ctx.drawImage(video,0,0,w,h);const pixels=ctx.getImageData(0,0,w,h);
-            pending={generation,capturedAt:start,readbackMs:performance.now()-start};
+            pending={generation,capturedAt:start,readbackMs:performance.now()-start,analysisSize:{width:w,height:h}};
             worker.postMessage({generation,width:w,height:h,buffer:pixels.data.buffer,stamp},[pixels.data.buffer]);
           } catch {failed=true;pending=null;}
         }
       }
     }
-    publish();timer=setTimeout(tick,50);
+    publish();timer=setTimeout(tick,25);
   }
   document.addEventListener('visibilitychange',invalidate);
   tick();

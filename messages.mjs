@@ -1,4 +1,5 @@
 export const messages = {
+  "汉堡已定位 · 核心待确认": ["バーガーを検出 · コアを確認中", "Burger located · confirming core"],
   "自动（浏览器语言）": [
     "自動（ブラウザー）",
     "Auto (browser)"

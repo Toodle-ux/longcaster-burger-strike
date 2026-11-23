@@ -1,11 +1,11 @@
-import {t,getLanguage,setupLanguages} from './i18n.mjs?v=9';
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=11';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=10';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=11';
 import './ar/core-display.js?v=10';
 import {createAudio} from './audio.mjs?v=9';
-import {setupOrientation} from './orientation.mjs?v=9';
+import {setupOrientation} from './orientation.mjs?v=11';
 import {Mission} from './engine.mjs?v=4';
-import {setupLocalVideo} from './local-video.mjs?v=9';
+import {setupLocalVideo} from './local-video.mjs?v=11';
 import {createEffects} from './effects.mjs?v=4';
 const $ = id => document.getElementById(id);
 const game = new Mission();
@@ -72,7 +72,8 @@ function applyRecognition(observation) {
   targetVisible=!!projectedCore(observation);
   const measuredVisible=!!projectedCore({...observation,displayPose:result?.coreCenter?{center:result.coreCenter}:null});
   game.tracked=measuredVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
-  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):'寻找汉堡 · 请保持完整入镜';
+  const visualLocated=observation.diagnostics?.live&&observation.diagnostics.resultAgeMs<=250&&observation.diagnostics.frameAgeMs<=250&&result?.visual?.targetFound;
+  const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 暂停攻击':state==='exposed'?'核心露出 · 可攻击':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 暂停攻击':'角度不确定 · 请缓慢移动手机'):visualLocated?'汉堡已定位 · 核心待确认':'寻找汉堡 · 请保持完整入镜';
   $('recognition-status').textContent=t('桌面实验识别 · {message}',{message:t(message)});
   $('tracking-hint').textContent=t(game.destroyed?'核心已击破 · 重置后再试':message);
   render();
