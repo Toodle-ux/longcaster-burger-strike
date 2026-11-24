@@ -60,7 +60,7 @@
     const position=Math.hypot(p.x-reference.x,p.y-reference.y)/(reference.scale*geometry.fillingDiameter*(.12+2*dt));
     return {cost:.055*Math.min(size,3)+.035*Math.min(position,3),allowed:size<=1&&position<=1,size,position};
   }
-  const merit=(p,e,reference,dtMs)=>e.score-continuity(p,reference,dtMs).cost-
+  const merit=(p,e,reference,dtMs)=>e.rankingScore-continuity(p,reference,dtMs).cost-
     (reference ? .02*Math.min(2,Math.abs(p.t-reference.t)/3) : 0);
   const NONE=0,GREEN=1,YELLOW=2,BUN=3,DARK=4,WHITE=5;
   function hull(points) {
@@ -337,8 +337,21 @@
         if(anchor){anchor.x+=p.x;anchor.y+=p.y;anchor.n++;}
       }
       for(const a of Object.values(anchors)){a.x/=a.n||1;a.y/=a.n||1;}
+      // Thin lower bun: dense interior samples, kept separate from mandatory
+      // material evidence. Its absence behind a tray must not lower confidence.
+      const lowerSamples=[];
+      for(let y=1;y<N-1;y++)for(let x=2;x<N-2;x+=3){
+        const k=y*N+x;
+        if(material[k]===3&&[k-1,k+1,k-N,k+N].every(i=>material[i]===3))
+          lowerSamples.push({x:(x-32)*step,y:(y-32)*step});
+      }
+      const layerAnchors=[1,2].map(band=>{
+        const points=samples.filter(p=>p.m===2&&p.band===band&&Math.abs(p.x)<geometry.upperDiameter*.23);
+        return points.length>=3?{x:points.reduce((s,p)=>s+p.x,0)/points.length,
+          y:points.reduce((s,p)=>s+p.y,0)/points.length}:null;
+      });
       const upperIds=new Set(mesh.faces.filter(f=>f.part==='upper').flatMap(f=>f.ids));
-      output.push({elevation,samples,groups,anchors,upperHull:hull([...upperIds].map(i=>({x:points[i].x,y:points[i].y}))),centerMaterial:material[32*N+32]===2?'filling':'bun'});
+      output.push({elevation,samples,groups,anchors,layerAnchors,lowerSamples,upperHull:hull([...upperIds].map(i=>({x:points[i].x,y:points[i].y}))),centerMaterial:material[32*N+32]===2?'filling':'bun'});
     }
     return output;
   }
@@ -351,6 +364,53 @@
   // Weak colour order for this single toy style; these are image cues inside
   // the filling, not additional geometry or a learned material classifier.
   const fillingBands=[[0,.15,1,.25,.3,.1],[0,.15,.3,.15,1,.1],[0,1,.25,.05,.25,.1]];
+  // Current visible bands only, not a hidden-bottom estimate or meat detector.
+  // Broad dark-above-green support prevents a thin HUD line or side decoration
+  // from becoming a layer measurement. Unavailable evidence is neutral.
+  function visibleLayers(frame){
+    if(!frame.cap)return null;
+    const b=bounds(frame.cap.points),w=b.right-b.left;
+    const left=Math.max(0,Math.ceil(b.left+w*.27)),right=Math.min(frame.w-1,Math.floor(b.right-w*.27));
+    const top=Math.ceil(b.bottom+w*.015),bottom=Math.min(frame.h-1,Math.floor(b.bottom+w*.8));
+    const rows=[];
+    for(let y=top;y<=bottom;y++){
+      let green=0,dark=0,warm=0;
+      for(let x=left;x<=right;x++){
+        const v=frame.labels[y*frame.w+x];green+=v===GREEN;dark+=v===DARK;warm+=v===BUN||v===YELLOW;
+      }
+      const n=right-left+1;rows.push({y,green:green/n,dark:dark/n,warm:warm/n});
+    }
+    const runs=(key,threshold,minHeight,start,end)=>{
+      const found=[];let run=[];
+      const finish=()=>{if(run.length>=Math.max(3,w*minHeight)){
+        const weight=run.reduce((s,r)=>s+r[key],0);
+        found.push({top:run[0].y,bottom:run.at(-1).y,y:run.reduce((s,r)=>s+r.y*r[key],0)/weight,
+          support:weight/run.length});}run=[];};
+      for(const r of rows){if(r.y>=start&&r.y<=end&&r[key]>=threshold)run.push(r);else finish();}finish();return found;
+    };
+    const green=runs('green',.4,.04,top+w*.04,bottom)[0];
+    if(!green)return null;
+    const dark=runs('dark',.35,.025,top,green.top-1).sort((a,b)=>(b.bottom-b.top)*b.support-(a.bottom-a.top)*a.support)[0];
+    if(!dark||green.y-dark.y<w*.06)return null;
+    const lowerEnd=Math.min(bottom,green.bottom+w*.14);
+    const lower=runs('warm',.6,.025,green.bottom+1,lowerEnd).find(run=>{
+      // An open-ended warm strip or one extending beyond the burger can be
+      // the tray. Without both boundaries, there is no lower-bun observation.
+      if(run.bottom>=Math.floor(lowerEnd)-1)return false;
+      const cy=Math.round(run.y),cx=(b.left+b.right)/2;
+      for(const sign of [-1,1]){
+        let warm=0;
+        for(let i=0;i<5;i++){
+          const x=Math.round(cx+sign*w*(.62+i*.025)),v=frame.labels[cy*frame.w+x];
+          if(x<0||x>=frame.w)return false;
+          warm+=v===BUN||v===YELLOW;
+        }
+        if(warm>=3)return false;
+      }
+      return true;
+    })??null;
+    return {dark,green,lower,width:w};
+  }
   function evaluate(frame,p) {
     const template=templateOf(p),c=Math.cos(p.roll*DEG),s=Math.sin(p.roll*DEG),sum=[0,0,0,0],count=[0,0,0,0];
     let greens=0,darks=0,buns=0;
@@ -380,7 +440,26 @@
       contourOutlierFraction=Math.max(...[a,b].map(errors=>errors.filter(e=>e/frame.cap.width>.1).length/errors.length));
       score=.45*score+.55*Math.max(0,1-contourError*8);
     }
-    return {score,contourError,contourMaxError,capHeightError,contourOutlierFraction,upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
+    let layerError=null,layerBonus=0,lowerBonus=0;
+    if(frame.layers&&template.layerAnchors.every(Boolean)){
+      const predicted=template.layerAnchors.map(q=>p.y+p.scale*(-q.x*s+q.y*c));
+      layerError=(Math.abs(predicted[0]-frame.layers.dark.y)+Math.abs(predicted[1]-frame.layers.green.y))/(2*frame.layers.width);
+      // The stylised layers are irregular: do not chase sub-band pixel noise.
+      // Only use their positions to rank materially different model fits.
+      layerBonus=.06*clamp((.12-layerError)/.08,0,1);
+      if(frame.layers.lower&&template.lowerSamples.length){
+        let supported=0;
+        for(const q of template.lowerSamples){
+          const x=Math.round(p.x+p.scale*(q.x*c+q.y*s)),y=Math.round(p.y+p.scale*(-q.x*s+q.y*c));
+          if(x<0||x>=frame.w||y<frame.layers.lower.top||y>frame.layers.lower.bottom)continue;
+          const label=frame.labels[y*frame.w+x];supported+=label===BUN||label===YELLOW;
+        }
+        lowerBonus=.01*supported/template.lowerSamples.length;
+      }
+    }
+    return {score,rankingScore:score+layerBonus+lowerBonus,layerEvidence:frame.layers??null,layerError,layerBonus,lowerBonus,
+      lowerSampleCount:template.lowerSamples.length,contourError,contourMaxError,capHeightError,contourOutlierFraction,
+      upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
   }
   // The detected cap fixes translation and scale for EACH orientation. Colour
   // evidence may select a view, but cannot slide/shrink the model off the bun.
@@ -572,6 +651,7 @@
       frame.cap=frame.table?(observedCap===undefined?capObservation(input,frame,this.selection):
         observedCap?{points:observedCap.contour,width:observedCap.box.width,sesame:observedCap.sesame}:null):null;
       if(frame.table&&!frame.cap)return this.missing(timestampMs,'no-complete-cap',{frame});
+      frame.layers=visibleLayers(frame);
       const contour=frame.cap?.points.map(p=>({x:p.x/frame.w,y:p.y/frame.h}))??null;
       const hypotheses=frame.table?[]:seeds(frame,this.selection);
       let reference=this.last?.raw;
@@ -640,7 +720,7 @@
       // alternatives against the last stable pose; never rescue a failed fit.
       // Costs are bounded, so clearly better current evidence can change view.
       const stableReference=frame.table&&!frame.attitude?.used?this.lock?.raw:null;
-      const selectionMerit=p=>p.e.score-(stableReference?
+      const selectionMerit=p=>p.e.rankingScore-(stableReference?
         .035*Math.min(2,Math.abs(p.t-stableReference.t))+
         .01*Math.min(2,Math.abs(wrap(p.roll-stableReference.roll))/15):0);
       supportedFits.sort((a,b)=>selectionMerit(b)-selectionMerit(a));
@@ -752,5 +832,6 @@
     return {supported:warm/capN>=.3&&green>=5&&dark>=15&&greenColumns.size>=2&&darkColumns.size>=3,
       warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
   }
-  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap,supportsContour};
+  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap,supportsContour,
+    observeLayers:(input,contour)=>visibleLayers({...frameData(input),cap:contour?{points:contour}:null})};
 })();
