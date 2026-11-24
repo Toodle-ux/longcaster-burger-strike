@@ -34,7 +34,7 @@
       this.reset();
     }
     reset(){this.visual.reset();this.geometry.reset();this.anchor=null;this.pendingPose=null;
-      this.exposure=null;this.blockedAt=null;this.lastTime=-Infinity;this.size='';}
+      this.exposure=null;this.confirmedExposure=null;this.blockedAt=null;this.lastTime=-Infinity;this.size='';}
     observe(){if(this.detection===undefined)this.detection=this.detect(this.input);return this.detection;}
     update(input,timestampMs){
       const size=input.width+'x'+input.height;
@@ -44,17 +44,19 @@
       const base=globalThis.BurgerPose.empty(timestampMs,visual.reason);
       if(!visual.targetFound){
         // Do not retain a core over a different reacquired object.
-        this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;this.blockedAt=null;
+        this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;this.confirmedExposure=null;this.blockedAt=null;
         return {...base,visual,geometryState:'not-evaluated',integration:'vision-6-game'};
       }
-      const observation=this.observe(),matched=observation&&sameTarget(visual.targetBounds,observation.box);
+      const observation=this.observe();
+      const matched=observation&&sameTarget(visual.targetBounds,observation.box);
+      if(observation&&!matched)this.confirmedExposure=null;
       const fit=this.geometry.update(input,timestampMs,{capObservation:matched?observation:null,
         contourRecovery:!!matched&&!!this.anchor&&timestampMs-this.anchor.time<500});
       const continuingBlocked=this.blockedAt!==null&&timestampMs-this.blockedAt<=250;
       this.blockedAt=null;
       const result={...fit,displayPose:null,displayStatus:'none',displayOpacity:0,
         visual,geometryState:fit.reason,integration:'vision-6-game',
-        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry'}};
+        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry',capMethod:matched?observation.method:null}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
         // Current candidates can unanimously block a shot even while their
         // exact core location is being confirmed. This never grants a hit or
@@ -80,24 +82,32 @@
           this.pendingPose.count++;
           accepted=this.pendingPose.count>=CONFIRM_FRAMES&&timestampMs-this.pendingPose.since>=CONFIRM_MS;
         }
-        result.stabilization={rawState:fit.modelAttackability,
+        result.stabilization={...result.stabilization,
           reason:accepted?'current-geometry':'confirming-core',pendingFrames:this.pendingPose?.count??0};
+        if(!accepted||fit.modelAttackability!=='exposed')this.confirmedExposure=null;
         if(accepted){
           this.anchor={pose,local,box:{...visual.targetBounds},time:timestampMs};this.pendingPose=null;
-          // Revocation is immediate. Reacquiring permission needs a continuous
-          // run of exposed evidence; display holds never contribute to this run.
+          // A missing frame revokes permission. A brief miss may retain identity,
+          // but recovery still needs a NEW exposed model on the same contour.
+          const resumed=fit.modelAttackability==='exposed'&&this.confirmedExposure&&
+            timestampMs-this.confirmedExposure.time<=250&&agrees(local,this.confirmedExposure.local);
           if(fit.modelAttackability==='exposed'){
             this.exposure??={since:timestampMs,count:0};this.exposure.count++;
           } else this.exposure=null;
-          const exposedReady=this.exposure&&this.exposure.count>=CONFIRM_FRAMES&&
+          const exposedReady=resumed||this.exposure&&this.exposure.count>=CONFIRM_FRAMES&&
             timestampMs-this.exposure.since>=CONFIRM_MS;
           const state=fit.modelAttackability==='exposed'&&!exposedReady?'unknown':fit.modelAttackability;
           if(fit.modelAttackability==='exposed'&&!exposedReady)result.stabilization.reason='confirming-exposure';
+          if(state==='exposed'){
+            if(resumed&&this.exposure.count===1)result.stabilization.reason='exposure-resumed';
+            this.confirmedExposure={local,time:timestampMs};
+          }
           return {...result,pose,coreCenter:pose.center,modelAttackability:state,
             displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'current-contour'};
         }
       } else {
         this.pendingPose=null;
+        if(['uncertain-placement','continuity-rejected','multiple-targets'].includes(fit.reason))this.confirmedExposure=null;
       }
       this.exposure=null;
       // Image-supported short display only. Its age is measured from the last

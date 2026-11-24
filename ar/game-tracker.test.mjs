@@ -21,7 +21,7 @@ function fixture(){
       pose:{center:{...state.center},scalePerSourceWidth:state.scale,elevationDegrees:state.elevation,rollDegrees:0},
       coreCenter:{x:.5,y:.5},coreBounds:{x:.48,y:.48,width:.04,height:.04},
       attackRegion:{center:{x:.5,y:.5},radiusMm:2,radiusX:state.scale*2,radiusY:state.scale*2},
-      modelAttackability:state.exposed?'exposed':'blocked',reason:'current-model-fit'};
+      modelAttackability:state.unknown?'unknown':state.exposed?'exposed':'blocked',reason:'current-model-fit'};
   }};
   return {state,tracker:new BurgerGameTracker.Tracker({visual,geometry,detect:()=>state.detection})};
 }
@@ -58,14 +58,32 @@ test('alternating core estimates cannot move or indefinitely renew a held marker
   assert.equal(r.displayPose,null);assert.equal(r.evidenceTimestampMs,null);
 });
 
-test('uncertainty revokes attacks immediately and interrupts exposure confirmation',()=>{
+test('brief misses revoke attacks but fresh same-target exposed evidence can resume',()=>{
   const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);
   assert.equal(tracker.update(input,180).modelAttackability,'exposed');
   state.geometry=false;assert.equal(tracker.update(input,200).modelAttackability,'unknown');
-  state.geometry=true;assert.equal(tracker.update(input,250).modelAttackability,'unknown');
+  state.geometry=true;const resumed=tracker.update(input,250);
+  assert.equal(resumed.modelAttackability,'exposed');assert.equal(resumed.stabilization.reason,'exposure-resumed');
   tracker.update(input,340);assert.equal(tracker.update(input,430).modelAttackability,'exposed');
   state.exposed=false;assert.equal(tracker.update(input,450).modelAttackability,'blocked');
   state.exposed=true;assert.equal(tracker.update(input,500).modelAttackability,'unknown');
+});
+
+test('first exposure, expired evidence, conflicting poses and identity changes require confirmation',()=>{
+  for(const change of ['first','expired','conflict','identity','branch']){
+    const {state,tracker}=fixture();tracker.update(input,0);tracker.update(input,90);
+    if(change!=='first')tracker.update(input,180);
+    let stamp=250;
+    if(change==='conflict'){state.unknown=true;tracker.update(input,200);state.unknown=false;}
+    if(change==='identity'){state.found=false;tracker.update(input,200);state.found=true;}
+    if(change==='branch'){state.center={x:.65,y:.5};tracker.update(input,200);state.center={x:.5,y:.5};}
+    if(change==='expired'||change==='first'){
+      state.geometry=false;tracker.update(input,200);
+      if(change==='expired'){tracker.update(input,350);stamp=450;}
+      state.geometry=true;
+    }
+    assert.equal(tracker.update(input,stamp).modelAttackability,'unknown',change);
+  }
 });
 
 test('image translation and zoom follow immediately without a false core branch change',()=>{

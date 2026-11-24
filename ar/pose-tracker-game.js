@@ -392,8 +392,9 @@
     return {...p,scale,x:(observed.left+observed.right-scale*(box.left+box.right))/2,
       y:(observed.top+observed.bottom-scale*(box.top+box.bottom))/2};
   }
-  function refine(frame,start,previous,dtMs) {
-    let p=alignCap(frame,{...start}),e=evaluate(frame,p);
+  function refine(frame,start,previous,dtMs,stable=null) {
+    let p=alignCap(frame,frame.table&&!frame.attitude?.used?
+      {...start,t:Math.round(start.t),template:undefined}:{...start}),e=evaluate(frame,p);
     let score=merit(p,e,previous,dtMs);
     const diameter=p.scale*geometry.fillingDiameter;
     for(const fraction of [1,.5])for(let pass=0;pass<2;pass++) {
@@ -412,7 +413,34 @@
         p=best;e=bestEvidence;score=bestScore;
       }
     }
-    return {...p,e,merit:score};
+    // Refit the actual mesh between ten-degree search seeds. Do not average
+    // exposed/blocked states or interpolate a core outside its current contour.
+    if(frame.table&&!frame.attitude?.used){
+      const base=templateOf(p).elevation;
+      // Use the same bounded preference as final candidate selection. Current
+      // contour/material gates still reject an unsupported previous angle.
+      const fineMerit=(q,qe)=>merit(q,qe,previous,dtMs)-(stable?
+        .035*Math.min(2,Math.abs(q.t-stable.t)):0);
+      score=fineMerit(p,e);
+      for(const step of [3,1])for(let pass=0;pass<2;pass++){
+        let best=p,bestEvidence=e,bestScore=score;
+        for(const sign of [-1,1]){
+          const angle=templateOf(p).elevation+step*sign;
+          if(angle<0||angle>90||Math.abs(angle-base)>5)continue;
+          const q=alignCap(frame,{...p,t:(angle+70)/10,template:fineTemplate(angle)});
+          const qe=evaluate(frame,q),qs=fineMerit(q,qe);
+          if(qs>bestScore){best=q;bestEvidence=qe;bestScore=qs;}
+        }
+        p=best;e=bestEvidence;score=bestScore;
+      }
+    }
+    return {...p,e,merit:merit(p,e,previous,dtMs)};
+  }
+  const fineTemplates=new Map();
+  function fineTemplate(angle){
+    if(angle%10===0)return templates[(angle+70)/10];
+    if(!fineTemplates.has(angle))fineTemplates.set(angle,buildTemplates([angle])[0]);
+    return fineTemplates.get(angle);
   }
   function fromAnchor(component,kind,t,roll,scale) {
     const a=templates[t].anchors[kind],c=Math.cos(roll*DEG),s=Math.sin(roll*DEG);
@@ -561,7 +589,7 @@
           orientations.push({t:Math.round((elevation+70)/10),template,roll:frame.attitude.rollDegrees});
           if(reference)reference={...reference,...orientations[0]};
         }else{
-          if(reference?.template)reference={...reference,template:undefined};
+          if(reference?.template)reference={...reference,t:Math.round(reference.t),template:undefined};
           for(let t=7;t<templates.length;t++)for(const roll of [-30,-15,0,15,30])orientations.push({t,roll});
         }
         for(const orientation of orientations){
@@ -586,12 +614,12 @@
         if(starts.some(q=>Math.hypot(p.x-q.x,p.y-q.y)<p.scale*3&&Math.abs(p.t-q.t)<3&&Math.abs(wrap(p.roll-q.roll))<20))continue;
         starts.push(p);if(starts.length>=5)break;
       }
-      const fitted=starts.map(p=>refine(frame,p,prior,dtMs)).sort((a,b)=>b.merit-a.merit);
+      const fitted=starts.map(p=>refine(frame,p,prior,dtMs,this.lock?.raw)).sort((a,b)=>b.merit-a.merit);
       const isSupported=q=>{
         if(frame.table){
           const layered=q.e.greens>=2&&q.e.darks>=2;
-          // Ten-degree templates differ by up to .11 bun widths in height;
-          // allow half a step plus pixel rounding, without freeing translation.
+          // Keep the existing contour gates after fine fitting; a closer angle
+          // must not rescue an incomplete silhouette or free its translation.
           const top=frame.cap.sesame.strong&&templateOf(q).elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
           const contourOK=supportsContour(q.e,!!this.lock||contourRecovery);
           return q.e.score>.65&&q.e.contourError<.055&&contourOK&&q.e.capHeightError<.065&&q.e.upper>.45&&(layered||top);
