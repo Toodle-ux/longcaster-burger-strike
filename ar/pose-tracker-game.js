@@ -72,6 +72,10 @@
     chain.pop();return chain;
   }
   function bounds(points){const xs=points.map(p=>p.x),ys=points.map(p=>p.y);return {left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)};}
+  function supportsContour(e,locked){
+    return e.contourMaxError<.13||locked&&e.contourError<.025&&
+      e.contourMaxError<.2&&e.contourOutlierFraction<=.1;
+  }
   function edgeDistance(p,polygon) {
     let best=Infinity;
     for(let i=0;i<polygon.length;i++){
@@ -361,7 +365,7 @@
     const fraction=sum.map((v,i)=>v/(count[i]||1));
     const weights=[.23,.34,.35,.08];let score=0,total=0;
     for(let i=0;i<4;i++)if(count[i]){score+=fraction[i]*weights[i];total+=weights[i];}
-    let contourError=null,contourMaxError=null,capHeightError=null;
+    let contourError=null,contourMaxError=null,capHeightError=null,contourOutlierFraction=null;
     score=score/total-(count[1]<3?.4:0);
     if(frame.cap){
       const projected=template.upperHull.map(q=>({x:p.x+p.scale*(q.x*c+q.y*s),y:p.y+p.scale*(-q.x*s+q.y*c)}));
@@ -371,9 +375,12 @@
       const a=observed.map(q=>edgeDistance(q,projected)),b=projected.map(q=>edgeDistance(q,observed));
       contourError=(a.reduce((s,x)=>s+x,0)/a.length+b.reduce((s,x)=>s+x,0)/b.length)/(2*frame.cap.width);
       contourMaxError=Math.max(...a,...b)/frame.cap.width;
+      // Count outliers separately in each direction: many good template points
+      // must not hide a substantial missing section of the observed outline.
+      contourOutlierFraction=Math.max(...[a,b].map(errors=>errors.filter(e=>e/frame.cap.width>.1).length/errors.length));
       score=.45*score+.55*Math.max(0,1-contourError*8);
     }
-    return {score,contourError,contourMaxError,capHeightError,upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
+    return {score,contourError,contourMaxError,capHeightError,contourOutlierFraction,upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
   }
   // The detected cap fixes translation and scale for EACH orientation. Colour
   // evidence may select a view, but cannot slide/shrink the model off the bun.
@@ -523,7 +530,7 @@
         null,input.width,input.height,timestampMs))};
       return out;
     }
-    fit(input,timestampMs,{temporal=true,tableAttitude=null,capObservation:observedCap=undefined}={}) {
+    fit(input,timestampMs,{temporal=true,tableAttitude=null,capObservation:observedCap=undefined,contourRecovery=false}={}) {
       if(!Number.isFinite(timestampMs)||input.data.length!==input.width*input.height*4)throw new TypeError('RGBA frame and monotonic timestamp required');
       if(!temporal||timestampMs<=this.lastTime||timestampMs-this.lastTime>HOLD_MS||this.previous&&
         (this.previous.w!==input.width||this.previous.h!==input.height)) {
@@ -586,7 +593,8 @@
           // Ten-degree templates differ by up to .11 bun widths in height;
           // allow half a step plus pixel rounding, without freeing translation.
           const top=frame.cap.sesame.strong&&templateOf(q).elevation>=50&&q.e.upper>.68&&q.e.contourError<.035;
-          return q.e.score>.65&&q.e.contourError<.055&&q.e.contourMaxError<.13&&q.e.capHeightError<.065&&q.e.upper>.45&&(layered||top);
+          const contourOK=supportsContour(q.e,!!this.lock||contourRecovery);
+          return q.e.score>.65&&q.e.contourError<.055&&contourOK&&q.e.capHeightError<.065&&q.e.upper>.45&&(layered||top);
         }
         const freshTop=hypotheses.some(p=>p.freshTop&&Math.hypot(p.x-q.x,p.y-q.y)<q.scale*8&&Math.abs(Math.log(p.scale/q.scale))<.3);
         // A small upside-down model on one green leaf can score highly. Require
@@ -716,5 +724,5 @@
     return {supported:warm/capN>=.3&&green>=5&&dark>=15&&greenColumns.size>=2&&darkColumns.size>=3,
       warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
   }
-  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap};
+  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap,supportsContour};
 })();

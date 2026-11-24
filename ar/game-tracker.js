@@ -34,7 +34,7 @@
       this.reset();
     }
     reset(){this.visual.reset();this.geometry.reset();this.anchor=null;this.pendingPose=null;
-      this.exposure=null;this.lastTime=-Infinity;this.size='';}
+      this.exposure=null;this.blockedAt=null;this.lastTime=-Infinity;this.size='';}
     observe(){if(this.detection===undefined)this.detection=this.detect(this.input);return this.detection;}
     update(input,timestampMs){
       const size=input.width+'x'+input.height;
@@ -44,15 +44,27 @@
       const base=globalThis.BurgerPose.empty(timestampMs,visual.reason);
       if(!visual.targetFound){
         // Do not retain a core over a different reacquired object.
-        this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;
+        this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;this.blockedAt=null;
         return {...base,visual,geometryState:'not-evaluated',integration:'vision-6-game'};
       }
       const observation=this.observe(),matched=observation&&sameTarget(visual.targetBounds,observation.box);
-      const fit=this.geometry.update(input,timestampMs,{capObservation:matched?observation:null});
+      const fit=this.geometry.update(input,timestampMs,{capObservation:matched?observation:null,
+        contourRecovery:!!matched&&!!this.anchor&&timestampMs-this.anchor.time<500});
+      const continuingBlocked=this.blockedAt!==null&&timestampMs-this.blockedAt<=250;
+      this.blockedAt=null;
       const result={...fit,displayPose:null,displayStatus:'none',displayOpacity:0,
         visual,geometryState:fit.reason,integration:'vision-6-game',
         stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry'}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
+        // Current candidates can unanimously block a shot even while their
+        // exact core location is being confirmed. This never grants a hit or
+        // renews the last positional evidence used by the 500 ms display hold.
+        if(fit.modelAttackability==='blocked'){
+          // Continue a blocked run, rather than flashing isolated negative
+          // estimates while position is pending. Both frames need real evidence.
+          if(continuingBlocked)result.occlusion={state:'blocked',timestampMs};
+          this.blockedAt=timestampMs;
+        }
         // The texture ROI preserves its acquisition aspect ratio. It is NOT
         // the current bun silhouette after a view change: reanchoring a fresh
         // model to that ROI displaces its core and breaks model/image alignment.

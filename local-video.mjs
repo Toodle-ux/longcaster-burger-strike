@@ -1,4 +1,4 @@
-import {t} from './i18n.mjs?v=13';
+import {t} from './i18n.mjs?v=14';
 export function setupLocalVideo({video, input, controls, playButton, replayButton, closeButton, time, beforeSelect, onSource, onMessage}) {
   let url = null, generation = 0;
   const clock = seconds => {

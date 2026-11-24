@@ -41,7 +41,7 @@
 .target-shell{mask-image:url('./assets/hud/hud_container_gnd01.png');-webkit-mask-image:url('./assets/hud/hud_container_gnd01.png')}
 .target.blocked .target-shell{mask-image:url('./assets/hud/hud_container_gnd02.png');-webkit-mask-image:url('./assets/hud/hud_container_gnd02.png')}
 .lock-diamond{inset:8%;background:#ff7771;mask-image:url('./assets/hud/hud_seeker01.png');-webkit-mask-image:url('./assets/hud/hud_seeker01.png')}
-.target.uncertain .lock-diamond{background:#e8d991}
+/* Selection colour is independent of geometric certainty; dashed shell and status text carry hit availability. */
 .target-title{top:calc(50% - 6px);font-size:clamp(9px,1.1vw,13px);left:calc(100% + 3px)}
 
 
@@ -55,7 +55,7 @@
 @media(orientation:landscape) and (max-height:500px){#tracking-hint{bottom:13%;font-size:10px}.permission-card{padding:20px}.permission-card h2{margin:10px 0}}
 
 /* Retained positions fade using evidence age, without extending hit permission. */
-.target{opacity:var(--tracking-opacity,1)}.target.destroyed{opacity:0}
+.target{opacity:var(--tracking-opacity,1);transition:opacity .1s linear}.target.destroyed{opacity:0}
 .diagnostics{margin-top:12px;border-top:1px solid #9df5a440;padding-top:10px}
 .diagnostics summary{font-size:11px;cursor:pointer}.diagnostics pre{white-space:pre-wrap;font:10px/1.7 HUD,monospace;margin:10px 0}.diagnostics p{font:10px/1.6 Arial,sans-serif;color:#a8b9ad}
 

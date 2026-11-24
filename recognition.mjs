@@ -1,8 +1,13 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
-export const RUNTIME_RELEASE='v13';
+export const RUNTIME_RELEASE='v14';
 export function permission(result,age) {
-  if(!result||age<0||age>MAX_EVIDENCE_AGE||result.tracking!=='found'||!result.targetFound||
+  if(!result||age<0||age>MAX_EVIDENCE_AGE)return 'unknown';
+  // Negative evidence does not require a precise target point. Positive hit
+  // permission still requires every existing current-position/region check.
+  if(result.visual?.targetFound&&result.occlusion?.state==='blocked'&&
+    result.occlusion.timestampMs===result.timestampMs)return 'blocked';
+  if(result.tracking!=='found'||!result.targetFound||
     !result.coreCenter||!result.attackRegion||result.evidenceTimestampMs!==result.timestampMs)return 'unknown';
   return ['exposed','blocked'].includes(result.modelAttackability)?result.modelAttackability:'unknown';
 }
@@ -42,7 +47,7 @@ export function setupRecognition({getSource,onResult}) {
     if(records.length>3600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/game-worker.js?v=13',import.meta.url));
+    worker=new Worker(new URL('./ar/game-worker.js?v=14',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;
@@ -51,7 +56,8 @@ export function setupRecognition({getSource,onResult}) {
       processingMs=data.processingMs;turnaroundMs=performance.now()-capturedAt;
       const visual=result.visual;
       record('result',{tracking:result.tracking,geometry:result.modelAttackability,reason:result.reason,
-        stabilization:result.stabilization,geometryState:result.geometryState,integration:result.integration,analysisSize:job.analysisSize,
+        stabilization:result.stabilization,occlusion:result.occlusion,decision:permission(result,turnaroundMs),
+        geometryState:result.geometryState,integration:result.integration,analysisSize:job.analysisSize,
         frameAgeMs:finite(performance.now()-lastFrameAt),
         visual:visual?{state:visual.state,reason:visual.reason,targetFound:visual.targetFound,
           anchor:visual.anchor,targetBounds:visual.targetBounds,inlierPoints:visual.inlierPoints,

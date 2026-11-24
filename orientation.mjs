@@ -1,4 +1,4 @@
-import {t} from './i18n.mjs?v=13';
+import {t} from './i18n.mjs?v=14';
 import {attitude, smoothAngle} from './attitude.mjs';
 
 // Recordings cannot use the viewing phone's attitude.

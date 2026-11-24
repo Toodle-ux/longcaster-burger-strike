@@ -5,6 +5,7 @@ await import('./attack-region-game.js');
 await import('./pose-tracker-game.js');
 await import('./visual-tracker.js');
 await import('./game-tracker.js');
+const {permission,observation}=await import('../recognition.mjs');
 
 const input={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};
 const box={x:60,y:40,width:80,height:40};
@@ -14,6 +15,7 @@ function fixture(){
   const visual={reset(){},update(){return {targetFound:state.found,state:state.found?'tracking':'lost',reason:'test',targetBounds:state.box};}};
   const geometry={reset(){},update(_,stamp,options){
     state.cap=options.capObservation;
+    state.recovery=options.contourRecovery;
     if(!state.geometry)return BurgerPose.empty(stamp,'weak-model-fit');
     return {...BurgerPose.empty(stamp),tracking:'found',targetFound:true,evidenceTimestampMs:stamp,
       pose:{center:{...state.center},scalePerSourceWidth:state.scale,elevationDegrees:state.elevation,rollDegrees:0},
@@ -79,6 +81,44 @@ test('a single exposed frame between blocked observations never enables attacks'
   state.exposed=true;assert.equal(tracker.update(input,50).modelAttackability,'unknown');
   state.exposed=false;assert.equal(tracker.update(input,100).modelAttackability,'blocked');
   state.exposed=true;assert.equal(tracker.update(input,150).modelAttackability,'unknown');
+});
+
+test('current blocked evidence survives position confirmation, never authorizes hits or renews position',()=>{
+  const {state,tracker}=fixture();state.exposed=false;tracker.update(input,0);
+  state.center={x:.65,y:.5};state.elevation=60;const r=tracker.update(input,50);
+  assert.equal(r.coreCenter,null);assert.equal(r.attackRegion,null);
+  assert.equal(r.evidenceTimestampMs,0);assert.equal(r.occlusion.timestampMs,50);
+  assert.equal(permission(r,0),'blocked');assert.equal(permission(r,251),'unknown');
+  assert.equal(observation(r,0,251).state,'unknown');
+  assert.equal(permission({...r,occlusion:{state:'blocked',timestampMs:0}},0),'unknown');
+  state.geometry=false;const missing=tracker.update(input,100);
+  assert.equal(permission(missing,0),'unknown');assert.equal(missing.occlusion,undefined);
+});
+
+test('exposed geometry never bypasses pending position, and visual loss clears negative evidence',()=>{
+  const {state,tracker}=fixture();state.exposed=false;tracker.update(input,0);
+  state.center={x:.65,y:.5};state.exposed=true;const r=tracker.update(input,50);
+  assert.equal(permission(r,0),'unknown');assert.equal(r.occlusion,undefined);
+  state.found=false;assert.equal(permission(tracker.update(input,100),0),'unknown');
+});
+
+test('small contour outliers require a prior lock; broad or extreme mismatch is rejected',()=>{
+  const good={contourMaxError:.15,contourError:.018,contourOutlierFraction:.08};
+  assert.equal(BurgerPose.supportsContour(good,true),true);
+  assert.equal(BurgerPose.supportsContour(good,false),false);
+  for(const bad of [{contourOutlierFraction:.2},{contourMaxError:.25},{contourError:.04}])
+    assert.equal(BurgerPose.supportsContour({...good,...bad},true),false);
+});
+
+test('game contour recovery requires recent geometry of the same tracked target',()=>{
+  const {state,tracker}=fixture();tracker.update(input,0);assert.equal(state.recovery,false);
+  tracker.update(input,50);assert.equal(state.recovery,true);
+  state.geometry=false;
+  for(const time of [150,250,350,450,550])tracker.update(input,time);
+  assert.equal(state.recovery,false);
+  state.geometry=true;tracker.update(input,600);
+  state.detection={...detection,box:{...box,x:150}};tracker.update(input,650);
+  assert.equal(state.recovery,false);
 });
 test('visual recognition alone and mismatched detections cannot grant a core or an attack',()=>{
   const {state,tracker}=fixture();state.geometry=false;
