@@ -1,6 +1,6 @@
-import './ar/coarse-model.js?v=19';
-import './ar/attack-region-game.js?v=19';
-import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=19';
+import './ar/coarse-model.js?v=20';
+import './ar/attack-region-game.js?v=20';
+import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=20';
 
 // Read-only view of the same model/pose used by the Worker. Never feeds back
 // into tracking or permission; the gameplay marker has separate UI smoothing.

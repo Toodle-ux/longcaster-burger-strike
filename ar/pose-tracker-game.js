@@ -108,6 +108,51 @@
       Math.hypot((q.left+q.right)/2-box.x-box.width/2,(q.top+q.bottom)/2-box.y-box.height/2)<box.width*.25&&
       h>=box.height*.55&&h<=box.height*1.6;
   }
+  // A colour proposal can stop inside a red/yellow gradient. Search only near
+  // its existing boundary for a sustained warm-to-background image edge.
+  // No model angle, predicted silhouette or previous-frame pixels are used.
+  function refineCap(input,observation){
+    if(!observation?.contour||observation.contour.length<6)return observation;
+    const {data,width,height}=input,outline=observation.contour,w=observation.box.width;
+    const read=(x,y)=>{
+      x=Math.round(x);y=Math.round(y);
+      if(x<0||y<0||x>=width||y>=height)return null;
+      const k=(y*width+x)*4;return [data[k],data[k+1],data[k+2]];
+    };
+    // The crown's shaded red rim can fall outside the saturated orange class.
+    // This broader chroma test is local edge support, never a new detector seed.
+    const warm=p=>p&&([BUN,YELLOW].includes(classify(...p))||
+      p[0]>75&&p[0]>p[1]*1.18&&p[0]>p[2]*1.15&&p[0]-Math.min(p[1],p[2])>30);
+    const points=[];let supported=0,travel=0;
+    for(let i=0;i<outline.length;i++){
+      const a=outline[i],b=outline[(i+1)%outline.length],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);
+      if(!length)continue;
+      const nx=dy/length,ny=-dx/length,steps=Math.max(1,Math.ceil(length/Math.max(2,w/24)));
+      // Do not walk down through the cheese to its unrelated lower edge.
+      const reach=Math.max(2,Math.round(w*(ny>.35?.04:.14))),d=Math.max(1,w*.015);
+      for(let j=0;j<steps;j++){
+        const x=a.x+dx*(j+.5)/steps,y=a.y+dy*(j+.5)/steps;
+        let best=null;
+        for(let offset=-2;offset<=reach;offset++){
+          const px=x+nx*offset,py=y+ny*offset;
+          const inside=[1,2,3].map(n=>read(px-nx*d*n,py-ny*d*n));
+          const outside=[1,2,3].map(n=>read(px+nx*d*n,py+ny*d*n));
+          if(inside.filter(warm).length<2||outside.some(p=>!p||warm(p)))continue;
+          const contrast=Math.hypot(...inside[0].map((v,k)=>v-outside[0][k]));
+          if(contrast<40)continue;
+          const score=contrast-2*Math.abs(offset);
+          if(!best||score>best.score)best={x:px,y:py,score,offset};
+        }
+        if(best){points.push({x:best.x,y:best.y});supported++;travel+=Math.abs(best.offset);}
+        else points.push({x,y});
+      }
+    }
+    if(supported<points.length*.6)return observation;
+    const contour=hull(points),box=bounds(contour),rw=box.right-box.left,rh=box.bottom-box.top;
+    if(rw<w*.9||rw>w*1.2||rh<observation.box.height*.85||rh>observation.box.height*1.4)return observation;
+    return {...observation,contour,box:{x:box.left,y:box.top,width:rw,height:rh},
+      refinement:{supportedFraction:supported/points.length,meanTravelPx:travel/supported}};
+  }
   function capObservation(input,frame,selection,recoveryBox=null) {
     // Red-orange crown proposal, separate from broad BUN material scoring.
     // This empirical colour test can fail on reddish wood, shadows or glare.
@@ -441,6 +486,7 @@
     for(let i=0;i<4;i++)if(count[i]){score+=fraction[i]*weights[i];total+=weights[i];}
     let contourError=null,contourMaxError=null,capHeightError=null,contourOutlierFraction=null;
     score=score/total-(count[1]<3?.4:0);
+    const materialScore=score;let contourScore=null;
     if(frame.cap){
       const projected=template.upperHull.map(q=>({x:p.x+p.scale*(q.x*c+q.y*s),y:p.y+p.scale*(-q.x*s+q.y*c)}));
       const observed=frame.cap.points;
@@ -452,7 +498,8 @@
       // Count outliers separately in each direction: many good template points
       // must not hide a substantial missing section of the observed outline.
       contourOutlierFraction=Math.max(...[a,b].map(errors=>errors.filter(e=>e/frame.cap.width>.1).length/errors.length));
-      score=.45*score+.55*Math.max(0,1-contourError*8);
+      contourScore=Math.max(0,1-contourError*8);
+      score=.45*score+.55*contourScore;
     }
     let layerError=null,layerBonus=0,lowerBonus=0;
     if(frame.layers&&template.layerAnchors.every(Boolean)){
@@ -471,7 +518,11 @@
         lowerBonus=.01*supported/template.lowerSamples.length;
       }
     }
-    return {score,rankingScore:score+layerBonus+lowerBonus,layerEvidence:frame.layers??null,layerError,layerBonus,lowerBonus,
+    // Material still checks that this is a supported burger model. Once it is,
+    // rank tabletop orientations by shape and layer positions, not by which
+    // irregular patch of cheese happens to fall on a colour sample.
+    const rankingScore=frame.table&&contourScore!==null?.55*contourScore+layerBonus+lowerBonus:score+layerBonus+lowerBonus;
+    return {score,rankingScore,materialScore,contourScore,layerEvidence:frame.layers??null,layerError,layerBonus,lowerBonus,
       lowerSampleCount:template.lowerSamples.length,contourError,contourMaxError,capHeightError,contourOutlierFraction,
       upper:fraction[1],filling:fraction[2],lower:fraction[3],outside:fraction[0],greens,darks,buns,fillSamples:count[2]};
   }
@@ -854,7 +905,7 @@
     return {supported:warm/capN>=.3&&green>=5&&dark>=15&&greenColumns.size>=2&&darkColumns.size>=3,
       warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
   }
-  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap,supportsContour,
+  globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,refineCap,confirmCap,supportsContour,
     recoverCap:(input,box)=>box?detectCap(input,box):null,
     observeLayers:(input,contour)=>visibleLayers({...frameData(input),cap:contour?{points:contour}:null})};
 })();

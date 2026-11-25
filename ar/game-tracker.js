@@ -54,6 +54,8 @@
       const localSearch=!observation&&visual.inlierPoints>=7&&
         Number.isFinite(visual.lastDetectionAgeMs)&&visual.lastDetectionAgeMs<=3000;
       if(localSearch)observation=this.recover(input,visual.targetBounds);
+      if(observation&&sameTarget(visual.targetBounds,observation.box))
+        observation=globalThis.BurgerPose.refineCap(input,observation);
       const matched=observation&&sameTarget(visual.targetBounds,observation.box);
       if(observation&&!matched){this.confirmedExposure=null;this.pendingPose=null;}
       if(this.pendingPose&&(timestampMs-this.pendingPose.last>CONFIRM_GAP_MS||
@@ -64,7 +66,8 @@
       this.blockedAt=null;
       const result={...fit,displayPose:null,displayStatus:'none',displayOpacity:0,
         visual,geometryState:fit.reason,integration:'vision-6-game',
-        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry',capMethod:matched?observation.method:null,localSearch}};
+        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry',capMethod:matched?observation.method:null,
+          contourRefinement:matched?observation.refinement??null:null,localSearch}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
         // Current candidates can unanimously block a shot even while their
         // exact core location is being confirmed. This never grants a hit or

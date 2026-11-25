@@ -1,7 +1,7 @@
 // Keep the game detector separate from the independent visual/attitude pages
 // when copying this worker into the publication repository.
-importScripts('./coarse-model.js?v=19','./attack-region-game.js?v=19','./pose-tracker-game.js?v=19',
-  './visual-tracker.js?v=19','./game-tracker.js?v=19');
+importScripts('./coarse-model.js?v=20','./attack-region-game.js?v=20','./pose-tracker-game.js?v=20',
+  './visual-tracker.js?v=20','./game-tracker.js?v=20');
 const tracker=new BurgerGameTracker.Tracker();
 let generation=-1;
 self.onmessage=({data})=>{
