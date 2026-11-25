@@ -65,3 +65,6 @@
 #radio-text{white-space:pre-line}.radio p{overflow-wrap:anywhere}
 @media(orientation:portrait){.audio-toggle{top:60px;max-width:165px}.prototype-label{display:none}.brief-heading .icon-button{font-size:11px}.brief-heading .language-select{max-width:145px}.settings-panel .language-select{max-width:170px}}
 @media(orientation:landscape) and (max-height:500px){.audio-toggle{top:40px;font-size:9px;max-width:128px}.audio-note{font-size:9px;margin:5px 0}.brief-heading{gap:7px}.brief-heading .icon-button{font-size:10px;padding:5px 8px}.language-select{min-height:32px;max-width:155px}.brief-copy .privacy{line-height:1.5}}
+
+#model-debug{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}#model-debug-info{position:absolute;left:12px;bottom:104px;max-width:calc(100% - 24px);margin:0;padding:7px 9px;border:1px solid #70889970;border-radius:3px;background:#06101bd9;color:#e0edf5;font:10px/1.6 Arial,sans-serif;white-space:pre-wrap;pointer-events:none;z-index:4}.model-debug-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;font-size:12px}.model-debug-switch input{width:20px;height:20px;margin:0;accent-color:#8bd5fc}
+.video-live #model-debug-info{bottom:160px}

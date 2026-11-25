@@ -1,12 +1,13 @@
-import {t,getLanguage,setupLanguages} from './i18n.mjs?v=16';
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=17';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=16';
-import './ar/core-display-game.js?v=16';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=17';
+import './ar/core-display-game.js?v=17';
 import {createAudio} from './audio.mjs?v=9';
-import {setupOrientation} from './orientation.mjs?v=16';
-import {Mission} from './engine.mjs?v=16';
-import {setupLocalVideo} from './local-video.mjs?v=16';
-import {createEffects} from './effects.mjs?v=16';
+import {setupOrientation} from './orientation.mjs?v=17';
+import {Mission} from './engine.mjs?v=17';
+import {setupLocalVideo} from './local-video.mjs?v=17';
+import {createEffects} from './effects.mjs?v=17';
+import {createModelDebug} from './model-debug.mjs?v=17';
 const $ = id => document.getElementById(id);
 const game = new Mission();
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -15,6 +16,7 @@ const shotTimers = new Set();
 let active = false, stream = null, cameraPending = false, cameraGeneration = 0;
 let orientationController,recognitionController;
 const coreDisplay=new globalThis.BurgerCoreDisplay();
+const modelDebug=createModelDebug({canvas:$('model-debug'),info:$('model-debug-info'),toggle:$('model-debug-toggle'),t});
 let displayFrame=null,displayViewport='',displayVideo=null;
 function projectedCore({displayPose,video,type}) {
   if(!displayPose?.center||!video?.videoWidth)return null;
@@ -28,6 +30,7 @@ function paintCore(now) {
   if(viewport!==displayViewport||view.video!==displayVideo){coreDisplay.reset();displayViewport=viewport;displayVideo=view.video;}
   // Recheck evidence every frame. Interpolation never grants attacks or extends a hold.
   const point=coreDisplay.step(projectedCore(view),now);
+  modelDebug.render(view,app.clientWidth,app.clientHeight);
   if(view.type!=='demo') {
     $('target').classList.toggle('lost',!point);
     $('target').style.setProperty('--tracking-opacity',String(view.displayOpacity));
@@ -36,7 +39,7 @@ function paintCore(now) {
   }
   displayFrame=requestAnimationFrame(paintCore);
 }
-function stopDisplay(){cancelAnimationFrame(displayFrame);displayFrame=null;coreDisplay.reset();}
+function stopDisplay(){cancelAnimationFrame(displayFrame);displayFrame=null;coreDisplay.reset();modelDebug.clear();}
 function startDisplay(){if(displayFrame===null)displayFrame=requestAnimationFrame(paintCore);}
 let feedbackTimer,muted=true,voiceCount=0,targetVisible=true,lastRecognitionType='demo',lockAnnounced=false,lastDiagnosticsPaint=-Infinity;
 let audioState='off',radioKey='目标已确认。准备好就开火。',radioVoice=null,feedbackTitle='',feedbackKey='',cameraErrorKey='';
