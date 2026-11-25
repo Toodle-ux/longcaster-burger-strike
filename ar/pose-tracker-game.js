@@ -695,6 +695,13 @@
         starts.push(p);if(starts.length>=5)break;
       }
       const fitted=starts.map(p=>refine(frame,p,prior,dtMs,this.lock?.raw)).sort((a,b)=>b.merit-a.merit);
+      // Refinement rounds its seeds to 10 degrees and can lose the exact last
+      // orientation. Re-test that orientation on THIS contour/material evidence.
+      // Translation and scale still follow the current cap immediately.
+      if(frame.table&&!frame.attitude?.used&&this.lock){
+        const p=alignCap(frame,this.lock.raw),e=evaluate(frame,p);
+        fitted.push({...p,e,merit:merit(p,e,prior,dtMs)});
+      }
       const isSupported=q=>{
         if(frame.table){
           const layered=q.e.greens>=2&&q.e.darks>=2;
@@ -774,20 +781,21 @@
       const angleRange=possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null;
       const regionAPI=globalThis.BurgerAttackRegion;
       const regionEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templateOf(p).elevation));
+      const core=regionAPI?regionAPI.coreCenter(pose,frame.w,frame.h):pose.center;
       return {...empty(timestampMs),evidenceTimestampMs:timestampMs,tracking:'found',targetFound:true,
-        coreCenter:pose.center,coreBounds:{x:(best.x-radius)/frame.w,y:(best.y-radius)/frame.h,width:2*radius/frame.w,height:2*radius/frame.h},
+        coreCenter:core,coreBounds:{x:core.x-radius/frame.w,y:core.y-radius/frame.h,width:2*radius/frame.w,height:2*radius/frame.h},
         pose,displayPose:display,poseStatus:ambiguous?'ambiguous':'approximate',reason:ambiguous?'competing-poses':'current-model-fit',
         displayStatus:'measured',displayAgeMs:0,displayOpacity:1,
         // Only current measurements get a region. A frozen display marker is
         // not a fresh target and missing() clears this preview immediately.
-        attackRegion:regionAPI?{center:{...pose.center},radiusMm:regionAPI.RULE.radiusMm,
+        attackRegion:regionAPI?{center:{...core},radiusMm:regionAPI.RULE.radiusMm,
           radiusX:best.scale*regionAPI.RULE.radiusMm/frame.w,radiusY:best.scale*regionAPI.RULE.radiusMm/frame.h}:null,
         modelAttackability:placementUncertain||capOnly&&regionEvidence?.status==='exposed'?'unknown':regionEvidence?.status??'unknown',
         modelFillingFractionRange:regionEvidence?.fillingFractionRange??null,
         bunContour:contour,elevationRangeDegrees:angleRange,
         viewClass:angleRange?(angleRange[0]>=30?'oblique-top':angleRange[1]<=10?'side':'unknown'):null,
         // Geometric self-occlusion only. Fingers are absent from the mesh.
-        modelCenterSurface:ambiguous&&templateOf(competing).centerMaterial!==templateOf(best).centerMaterial?'unknown':templateOf(best).centerMaterial,
+        modelCenterSurface:regionEvidence?.centerSurface??'unknown',
         debug:{fit:best.e,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
           candidates:visuallySupported.map(p=>({elevationDegrees:templateOf(p).elevation,rollDegrees:p.roll,score:p.e.score,
             selectionScore:selectionMerit(p),continuous:supportedFits.includes(p),

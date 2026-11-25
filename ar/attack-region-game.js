@@ -1,6 +1,6 @@
 /* Geometry-only gameplay rule. Load coarse-model.js first. No image evidence,
  * hand/prop occlusion, temporal permission or score handling belongs here.
- * The sphere stays at the filling origin; its orthographic footprint is a
+ * The core sits 1 mm below the filling origin; its orthographic footprint is a
  * radius-2 mm disk. Trace that disk through the SAME mesh used for fitting.
  * A ray reaching filling counts as exposed, even though the core is internal.
  * 15% is an initial gameplay tolerance, NOT a recognition confidence threshold.
@@ -8,6 +8,15 @@
 (() => {
   const RULE=Object.freeze({radiusMm:2,minFillingFraction:.15,maxBlockedFillingFraction:.02,sampleStepMm:.25});
   const model=globalThis.BurgerModel,mesh=model.mesh(model.presets.candidate),cache=new Map();
+  // Gameplay calibration in model millimetres (+Y is up), not screen pixels.
+  // Keep fitting the unchanged mesh at its origin; all core consumers share this offset.
+  const CORE=Object.freeze([0,-1,0]);
+  const projectCore=transform=>model.project(CORE,transform);
+  function coreCenter(pose,width,height){
+    const p=projectCore({x:pose.center.x*width,y:pose.center.y*height,
+      scale:pose.scalePerSourceWidth*width,elevation:pose.elevationDegrees,roll:pose.rollDegrees});
+    return {x:p.x/width,y:p.y/height};
+  }
   function atElevation(elevation) {
     if(!Number.isFinite(elevation)||elevation< -90||elevation>90)throw new RangeError('Elevation must be -90..90 degrees');
     // No quantisation here: callers can also inspect the rule between the
@@ -15,7 +24,8 @@
     if(cache.has(elevation))return cache.get(elevation);
     const step=RULE.sampleStepMm,half=Math.ceil(RULE.radiusMm/step),n=half*2+1;
     const depth=new Float64Array(n*n).fill(-Infinity),material=new Uint8Array(n*n);
-    const vertices=mesh.vertices.map(p=>model.project(p,{x:0,y:0,scale:1,elevation,roll:0}));
+    const transform={x:0,y:0,scale:1,elevation,roll:0},core=projectCore(transform);
+    const vertices=mesh.vertices.map(p=>{const q=model.project(p,transform);return {...q,x:q.x-core.x,y:q.y-core.y};});
     for(const face of mesh.faces)for(const ids of [[0,1,2],[0,2,3]]) {
       const [a,b,c]=ids.map(i=>vertices[face.ids[i]]),den=(b.y-c.y)*(a.x-c.x)+(c.x-b.x)*(a.y-c.y);
       if(Math.abs(den)<1e-9)continue;
@@ -52,5 +62,5 @@
       fillingFractionRange:[Math.min(...values.map(v=>v.fillingFraction)),Math.max(...values.map(v=>v.fillingFraction))],
       centerSurface:values.every(v=>v.centerSurface===first.centerSurface)?first.centerSurface:'unknown'};
   }
-  globalThis.BurgerAttackRegion={RULE,atElevation,evaluate};
+  globalThis.BurgerAttackRegion={RULE,CORE,projectCore,coreCenter,atElevation,evaluate};
 })();

@@ -8,7 +8,7 @@ export const messages = {
   "模型估计角度 {angle}° · 画面内旋转 {roll}°": ["モデルの推定角度 {angle}° · 画面内回転 {roll}°", "Estimated model angle {angle}° · image rotation {roll}°"],
   "候选角度 {min}°～{max}°": ["候補角度 {min}°～{max}°", "Candidate angles {min}°–{max}°"],
   "青：上面包 · 紫：夹层 · 黄：下面包": ["水色：上バンズ · 紫：具材 · 黄：下バンズ", "Cyan: top bun · purple: filling · yellow: bottom bun"],
-  "白线：检测轮廓 · 白十字：模型中心": ["白線：検出輪郭 · 白十字：モデル中心", "White line: detected outline · white cross: model centre"],
+  "白线：检测轮廓 · 白十字：核心位置": ["白線：検出輪郭 · 白十字：コア位置", "White line: detected outline · white cross: core position"],
   "模型包含隐藏部分；中心未做界面平滑": ["隠れた部分も表示。中心は平滑化していません", "Includes hidden geometry; centre has no UI smoothing"],
   "汉堡已定位 · 核心待确认": ["バーガーを検出 · コアを確認中", "Burger located · confirming core"],
   "自动（浏览器语言）": [

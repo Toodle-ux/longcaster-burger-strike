@@ -102,7 +102,7 @@
             if(resumed&&this.exposure.count===1)result.stabilization.reason='exposure-resumed';
             this.confirmedExposure={local,time:timestampMs};
           }
-          return {...result,pose,coreCenter:pose.center,modelAttackability:state,
+          return {...result,pose,coreCenter:fit.coreCenter,modelAttackability:state,
             displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'current-contour'};
         }
       } else {

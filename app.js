@@ -1,13 +1,13 @@
-import {t,getLanguage,setupLanguages} from './i18n.mjs?v=17';
+import {t,getLanguage,setupLanguages} from './i18n.mjs?v=18';
 import {subtitles} from './subtitles.mjs?v=9';
-import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=17';
-import './ar/core-display-game.js?v=17';
+import {setupRecognition,sourcePoint,RUNTIME_RELEASE} from './recognition.mjs?v=18';
+import './ar/core-display-game.js?v=18';
 import {createAudio} from './audio.mjs?v=9';
-import {setupOrientation} from './orientation.mjs?v=17';
-import {Mission} from './engine.mjs?v=17';
-import {setupLocalVideo} from './local-video.mjs?v=17';
-import {createEffects} from './effects.mjs?v=17';
-import {createModelDebug} from './model-debug.mjs?v=17';
+import {setupOrientation} from './orientation.mjs?v=18';
+import {Mission} from './engine.mjs?v=18';
+import {setupLocalVideo} from './local-video.mjs?v=18';
+import {createEffects} from './effects.mjs?v=18';
+import {createModelDebug} from './model-debug.mjs?v=18';
 const $ = id => document.getElementById(id);
 const game = new Mission();
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -20,8 +20,12 @@ const modelDebug=createModelDebug({canvas:$('model-debug'),info:$('model-debug-i
 let displayFrame=null,displayViewport='',displayVideo=null;
 function projectedCore({displayPose,video,type}) {
   if(!displayPose?.center||!video?.videoWidth)return null;
+  return visibleSourcePoint(globalThis.BurgerAttackRegion.coreCenter(displayPose,video.videoWidth,video.videoHeight),video,type);
+}
+function visibleSourcePoint(center,video,type){
+  if(!center||!video?.videoWidth)return null;
   const app=$('app');
-  const point=sourcePoint(displayPose.center,video.videoWidth,video.videoHeight,app.clientWidth,app.clientHeight,type==='camera'?'cover':'contain');
+  const point=sourcePoint(center,video.videoWidth,video.videoHeight,app.clientWidth,app.clientHeight,type==='camera'?'cover':'contain');
   return point.x>=0&&point.x<=app.clientWidth&&point.y>=0&&point.y<=app.clientHeight?point:null;
 }
 function paintCore(now) {
@@ -73,7 +77,7 @@ function applyRecognition(observation) {
   }
   $('target').style.setProperty('--tracking-opacity',String(displayOpacity));
   targetVisible=!!projectedCore(observation);
-  const measuredVisible=!!projectedCore({...observation,displayPose:result?.coreCenter?{center:result.coreCenter}:null});
+  const measuredVisible=!!visibleSourcePoint(result?.coreCenter,video,type);
   game.tracked=measuredVisible&&state!=='unknown';game.setExposure(game.tracked&&state==='exposed');
   const visualLocated=observation.diagnostics?.live&&observation.diagnostics.resultAgeMs<=250&&observation.diagnostics.frameAgeMs<=250&&result?.visual?.targetFound;
   const message=failed?'识别暂不可用，请重开页面':video?.paused?'视频已暂停 · 无法命中':state==='exposed'?'核心露出 · 可命中':state==='blocked'?'面包遮挡 · 请降低视角':targetVisible?(displayStatus==='held'?'短时保留位置 · 无法命中':'角度不确定 · 请缓慢移动手机'):visualLocated?'汉堡已定位 · 核心待确认':'寻找汉堡 · 请保持完整入镜';

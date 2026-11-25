@@ -17,10 +17,12 @@ function fixture(){
     state.cap=options.capObservation;
     state.recovery=options.contourRecovery;
     if(!state.geometry)return BurgerPose.empty(stamp,'weak-model-fit');
+    const pose={center:{...state.center},scalePerSourceWidth:state.scale,elevationDegrees:state.elevation,rollDegrees:0};
+    const core=BurgerAttackRegion.coreCenter(pose,input.width,input.height);
     return {...BurgerPose.empty(stamp),tracking:'found',targetFound:true,evidenceTimestampMs:stamp,
-      pose:{center:{...state.center},scalePerSourceWidth:state.scale,elevationDegrees:state.elevation,rollDegrees:0},
-      coreCenter:{x:.5,y:.5},coreBounds:{x:.48,y:.48,width:.04,height:.04},
-      attackRegion:{center:{x:.5,y:.5},radiusMm:2,radiusX:state.scale*2,radiusY:state.scale*2},
+      pose,
+      coreCenter:core,coreBounds:{x:.48,y:.48,width:.04,height:.04},
+      attackRegion:{center:core,radiusMm:2,radiusX:state.scale*2,radiusY:state.scale*2},
       modelAttackability:state.unknown?'unknown':state.exposed?'exposed':'blocked',reason:'current-model-fit'};
   }};
   return {state,tracker:new BurgerGameTracker.Tracker({visual,geometry,detect:()=>state.detection})};
@@ -28,7 +30,7 @@ function fixture(){
 test('game adapter keeps the fresh model on its contour even when the texture ROI differs',()=>{
   const {state,tracker}=fixture();state.box={...box,x:70};
   const r=tracker.update(input,0);
-  assert.equal(r.tracking,'found');assert.deepEqual(r.coreCenter,{x:.5,y:.5});
+  assert.equal(r.tracking,'found');assert.deepEqual(r.pose.center,{x:.5,y:.5});assert.ok(r.coreCenter.y>r.pose.center.y);
   assert.notEqual(r.coreCenter.y,(state.box.y+state.box.height/2)/input.height);
   assert.equal(r.modelAttackability,'unknown');assert.equal(r.attackRegion.radiusMm,2);
   assert.deepEqual(r.attackRegion.center,r.coreCenter);assert.equal(r.evidenceTimestampMs,0);
@@ -91,7 +93,7 @@ test('image translation and zoom follow immediately without a false core branch 
   state.box={x:64,y:36,width:96,height:48};state.detection={...detection,box:state.box};
   state.center={x:.56,y:.54};state.scale=.024;const r=tracker.update(input,220);
   assert.equal(r.modelAttackability,'exposed');assert.equal(r.coreCenter.x,.56);
-  assert.equal(r.coreCenter.y,.54);assert.equal(r.attackRegion.radiusX,.048);
+  assert.equal(r.pose.center.y,.54);assert.ok(Math.abs(r.coreCenter.y-(.54+.024*Math.cos(10*Math.PI/180)))<1e-10);assert.equal(r.attackRegion.radiusX,.048);
 });
 
 test('a single exposed frame between blocked observations never enables attacks',()=>{

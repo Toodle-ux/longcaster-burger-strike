@@ -1,5 +1,6 @@
-import './ar/coarse-model.js?v=17';
-import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=17';
+import './ar/coarse-model.js?v=18';
+import './ar/attack-region-game.js?v=18';
+import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=18';
 
 // Read-only view of the same model/pose used by the Worker. Never feeds back
 // into tracking or permission; the gameplay marker has separate UI smoothing.
@@ -43,7 +44,7 @@ export function createModelDebug({canvas,info,toggle,t}){
       snap.held?t('短时保留 · 灰色虚线不是当前测量'):t('当前测量 · {state}',{state:t(snap.state==='exposed'?'核心露出':snap.state==='blocked'?'被面包遮挡':'角度不确定')});
     const angle=p?t('模型估计角度 {angle}° · 画面内旋转 {roll}°',{angle:p.elevationDegrees.toFixed(1),roll:p.rollDegrees.toFixed(1)}):'';
     const range=snap.range?t('候选角度 {min}°～{max}°',{min:snap.range[0].toFixed(1),max:snap.range[1].toFixed(1)}):'';
-    const text=[label,angle,range,t('青：上面包 · 紫：夹层 · 黄：下面包'),t('白线：检测轮廓 · 白十字：模型中心'),t('模型包含隐藏部分；中心未做界面平滑')].filter(Boolean).join('\n');
+    const text=[label,angle,range,t('青：上面包 · 紫：夹层 · 黄：下面包'),t('白线：检测轮廓 · 白十字：核心位置'),t('模型包含隐藏部分；中心未做界面平滑')].filter(Boolean).join('\n');
     const ratio=Math.min(globalThis.devicePixelRatio||1,2);
     const key=JSON.stringify([view.result?.timestampMs,snap.status,snap.state,p,width,height,ratio,text]);
     if(key===lastKey)return;lastKey=key;
@@ -60,7 +61,7 @@ export function createModelDebug({canvas,info,toggle,t}){
       const transform=screenPose(p,video.videoWidth,video.videoHeight,width,height,view.type);
       for(const part of parts)line(hull(part.vertices.map(v=>api.project(v,transform))),
         snap.held?'#aeb8c3':{upper:'#57e4ff',filling:'#ef8cff',lower:'#ffe182'}[part.part],snap.held?[5,5]:[]);
-      const {x,y}=transform;ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(x-6,y);ctx.lineTo(x+6,y);ctx.moveTo(x,y-6);ctx.lineTo(x,y+6);
+      const {x,y}=globalThis.BurgerAttackRegion.projectCore(transform);ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(x-6,y);ctx.lineTo(x+6,y);ctx.moveTo(x,y-6);ctx.lineTo(x,y+6);
       ctx.strokeStyle=snap.held?'#aeb8c3':'#fff';ctx.lineWidth=2;ctx.stroke();
     }
     if(snap.contour)line(snap.contour.map(q=>sourcePoint(q,video.videoWidth,video.videoHeight,width,height,
