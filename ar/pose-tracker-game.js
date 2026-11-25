@@ -102,13 +102,19 @@
       strong:spots.length>=3&&spots.reduce((s,p)=>s+p.count,0)>=5&&
       spread.right-spread.left>w*.22&&spread.bottom-spread.top>h*.18};
   }
-  function capObservation(input,frame,selection) {
+  function nearTrackedCap(q,box){
+    const w=q.right-q.left+1,h=q.bottom-q.top+1;
+    return w>=box.width*.75&&w<=box.width*1.3&&
+      Math.hypot((q.left+q.right)/2-box.x-box.width/2,(q.top+q.bottom)/2-box.y-box.height/2)<box.width*.25&&
+      h>=box.height*.55&&h<=box.height*1.6;
+  }
+  function capObservation(input,frame,selection,recoveryBox=null) {
     // Red-orange crown proposal, separate from broad BUN material scoring.
     // This empirical colour test can fail on reddish wood, shadows or glare.
     // Convex completion bridges sesame holes; it is an observed candidate,
     // not a model silhouette or a guaranteed complete segmentation.
     const data=input.data,greens=components(frame,GREEN,5),whites=components(frame,WHITE,1);
-    const side=sideCapObservation(input,frame,selection,greens,whites);
+    const side=sideCapObservation(input,frame,selection,greens,whites,recoveryBox);
     if(side)return side;
     // Start broad to retain the orange rim. Tighten only when it merges with
     // the wooden background; a single strict threshold clips the crown and
@@ -126,19 +132,21 @@
       // A complete cap cannot run out of the frame. Large wood patches used
       // to borrow a small nearby lettuce component as supporting evidence.
       if(q.left<=1||q.top<=1||q.right>=frame.w-2||q.bottom>=frame.h-2)continue;
+      if(recoveryBox&&!nearTrackedCap(q,recoveryBox))continue;
       if(selection&&Math.hypot(q.x-selection.x*frame.w,q.y-selection.y*frame.h)>w*1.5)continue;
       const green=greens.find(g=>{
         const gw=g.right-g.left+1;
         return gw>=w*.4&&gw<=w*1.6&&Math.abs(g.x-q.x)<w*.5&&g.y>q.y&&g.y-q.y<w*1.2&&g.count>5;
       });
       const sesame=sesameEvidence(frame,q,whites);
+      const localFilling=recoveryBox&&confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported;
       // A connected orange background/drink can borrow the burger's sesame.
       // Reject a lopsided cluster, then retry the stricter colour proposals;
       // never crop an invented bun out of an oversized connected component.
-      if(sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
+      if(!recoveryBox&&sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
       // Overhead views hide the filling. They may propose a cap independently;
       // acceptance still requires a rounded complete contour and a top-view fit.
-      if(!green&&!(h/w>=.65&&sesame.strong))continue;
+      if(recoveryBox?!localFilling:!green&&!(h/w>=.65&&sesame.strong))continue;
       const points=[];let white=0;
       for(let y=q.top;y<=q.bottom;y++)for(let x=q.left;x<=q.right;x++){
         const k=y*frame.w+x;
@@ -156,10 +164,15 @@
       // A shallow real crown can have a long, almost flat top. Only accept
       // that exception when the image supports the boundary AND filling;
       // a convex bridge across orange background must still be rejected.
-      if(bridges.length&&!(green&&h/w<.6&&
+      if(!recoveryBox&&bridges.length&&!(green&&h/w<.6&&
         confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported&&
         bridges.every(p=>supportedTopEdge(frame,p,outline[(outline.indexOf(p)+1)%outline.length],q))))continue;
-      candidates.push({points:outline,...q,width:w,green,redRatio,sesame});
+      const edge=recoveryBox?sideBoundaryEvidence(input,frame,outline,q):null;
+      // Existing texture identity can replace sesame distribution only when
+      // CURRENT boundaries and filling support the whole observed cap.
+      if(recoveryBox&&!edge.supported)continue;
+      candidates.push({points:outline,...q,width:w,green:green||localFilling,redRatio,sesame,
+        ...(recoveryBox?{method:'tracked-colour-cap',edge}:{})});
     }
     candidates.sort((a,b)=>b.count-a.count);
     // Do not choose between two similarly large orange/green objects.
@@ -186,7 +199,7 @@
   // Side-view proposal: yellow rim and orange crown belong to one silhouette.
   // Pale holes are allowed inside it, but a coloured rectangle alone is not
   // evidence: require an observed boundary on all sides and filling below.
-  function sideCapObservation(input,frame,selection,greens,whites){
+  function sideCapObservation(input,frame,selection,greens,whites,recoveryBox=null){
     const warm=v=>v===BUN||v===YELLOW,labels=Uint8Array.from(frame.labels,v=>warm(v)?BUN:NONE),candidates=[];
     const regions=components({...frame,labels},BUN,35).slice(0,30);
     for(const source of regions){
@@ -211,9 +224,10 @@
         p.bottom-p.top+1>=w*.22&&Math.abs(p.x-q.x)<w*.3&&p.top<q.top-w*.15&&
         p.bottom<=q.top+w*.15&&q.top-p.bottom<w*.2))continue;
       if(q.left<4||q.top<4||q.right>=frame.w-4||q.bottom>=frame.h-4)continue;
+      if(recoveryBox&&!nearTrackedCap(q,recoveryBox))continue;
       if(selection&&Math.hypot(q.x-selection.x*frame.w,q.y-selection.y*frame.h)>w*1.5)continue;
       const green=greens.find(g=>g.right-g.left+1>=w*.5&&g.right-g.left+1<=w*1.5&&Math.abs(g.x-q.x)<w*.3&&g.y>q.bottom&&g.y-q.bottom<w*.7);
-      if(!green||!confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported)continue;
+      if((!green&&!recoveryBox)||!confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported)continue;
       const points=[];let pale=0,red=0;q.count=0;
       for(let y=q.top;y<=q.bottom;y++)for(let x=q.left;x<=q.right;x++){
         const k=y*frame.w+x;
@@ -228,10 +242,10 @@
       // A plain rectangular rim is insufficient; retain observed shoulder
       // segments without imposing a particular dome height at shallow angles.
       if(outline.length<6)continue;
-      if(sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
+      if(!recoveryBox&&sesame.count>=3&&(sesame.offsetX>.12||sesame.spanX<.28))continue;
       const edge=sideBoundaryEvidence(input,frame,outline,q);
       if(!edge.supported)continue;
-      candidates.push({...q,points:outline,width:w,green,sesame,method:'side-outline',edge});
+      candidates.push({...q,points:outline,width:w,green:green||!!recoveryBox,sesame,method:recoveryBox?'tracked-side-outline':'side-outline',edge});
     }
     candidates.sort((a,b)=>b.count-a.count);
     if(candidates.length>1&&candidates[1].count>candidates[0].count*.7)return null;
@@ -806,8 +820,8 @@
   }
   // Independent image observation for the visual tracking experiment. This
   // cap centre is NOT the hidden filling centre and conveys no attack state.
-  function detectCap(input){
-    const frame=frameData(input),cap=capObservation(input,frame,null);
+  function detectCap(input,recoveryBox=null){
+    const frame=frameData(input),cap=capObservation(input,frame,null,recoveryBox);
     if(!cap)return null;
     const box=bounds(cap.points);
     return {box:{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top},
@@ -841,5 +855,6 @@
       warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
   }
   globalThis.BurgerPose={Tracker,empty,geometry,classify,HOLD_MS,detectCap,confirmCap,supportsContour,
+    recoverCap:(input,box)=>box?detectCap(input,box):null,
     observeLayers:(input,contour)=>visibleLayers({...frameData(input),cap:contour?{points:contour}:null})};
 })();

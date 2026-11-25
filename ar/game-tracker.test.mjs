@@ -12,7 +12,8 @@ const box={x:60,y:40,width:80,height:40};
 const detection={box,contour:[],sesame:{strong:false}};
 function fixture(){
   const state={found:true,geometry:true,exposed:true,box:{...box},detection,center:{x:.5,y:.5},elevation:10,scale:.02};
-  const visual={reset(){},update(){return {targetFound:state.found,state:state.found?'tracking':'lost',reason:'test',targetBounds:state.box};}};
+  const visual={reset(){},update(){return {targetFound:state.found,state:state.found?'tracking':'lost',reason:'test',targetBounds:state.box,
+    inlierPoints:state.inliers??0,lastDetectionAgeMs:state.detectionAge??0};}};
   const geometry={reset(){},update(_,stamp,options){
     state.cap=options.capObservation;
     state.recovery=options.contourRecovery;
@@ -47,6 +48,70 @@ test('a core branch jump is held without permission; repeated new evidence accep
   tracker.update(input,320);r=tracker.update(input,410);
   assert.equal(r.coreCenter.x,.65);assert.equal(r.modelAttackability,'unknown');
   tracker.update(input,500);assert.equal(tracker.update(input,590).modelAttackability,'exposed');
+});
+
+test('three fresh consistent models can confirm across brief misses; misses never score or renew hold',()=>{
+  const {state,tracker}=fixture();tracker.update(input,0);
+  state.center={x:.65,y:.5};state.elevation=50;
+  assert.equal(tracker.update(input,100).stabilization.pendingFrames,1);
+  state.geometry=false;let r=tracker.update(input,160);
+  assert.equal(r.coreCenter,null);assert.equal(permission(r,0),'unknown');assert.equal(r.evidenceTimestampMs,0);
+  state.geometry=true;assert.equal(tracker.update(input,220).stabilization.pendingFrames,2);
+  state.geometry=false;assert.equal(tracker.update(input,280).coreCenter,null);
+  state.geometry=true;r=tracker.update(input,340);
+  assert.equal(r.coreCenter.x,.65);assert.equal(r.evidenceTimestampMs,340);
+  assert.equal(r.modelAttackability,'unknown','position confirmation does not bypass exposure confirmation');
+});
+
+test('expired or conflicting confirmation votes cannot accumulate across missing frames',()=>{
+  for(const change of ['gap','conflict','identity','detection']){
+    const {state,tracker}=fixture();tracker.update(input,0);state.center={x:.65,y:.5};state.elevation=50;
+    tracker.update(input,100);state.geometry=false;tracker.update(input,200);
+    let time=300;
+    if(change==='gap'){tracker.update(input,300);time=400;}
+    if(change==='conflict'){state.center={x:.35,y:.5};}
+    if(change==='identity'){state.found=false;tracker.update(input,250);state.found=true;}
+    if(change==='detection'){state.detection={...detection,box:{...box,x:150}};tracker.update(input,250);state.detection=detection;}
+    state.geometry=true;const r=tracker.update(input,time);
+    if(change==='identity')assert.equal(r.modelAttackability,'unknown');
+    else {assert.equal(r.stabilization.pendingFrames,1,change);assert.equal(r.coreCenter,null,change);}
+  }
+});
+
+test('local contour search needs live texture identity and cannot override a conflicting detection',()=>{
+  const {state,tracker}=fixture();let calls=0;
+  tracker.recover=()=>{calls++;return {...detection,method:'tracked-colour-cap'};};
+  state.detection=null;tracker.update(input,0);assert.equal(calls,0);
+  state.inliers=8;state.detectionAge=200;let r=tracker.update(input,50);
+  assert.equal(calls,1);assert.equal(r.stabilization.capMethod,'tracked-colour-cap');
+  assert.equal(r.modelAttackability,'unknown');
+  state.geometry=false;r=tracker.update(input,100);assert.equal(calls,2);assert.equal(r.coreCenter,null);
+  state.detectionAge=3100;tracker.update(input,150);assert.equal(calls,2);
+  state.detectionAge=0;state.detection={...detection,box:{...box,x:150}};tracker.update(input,200);assert.equal(calls,2);
+  state.detection=null;state.found=false;tracker.update(input,250);assert.equal(calls,2);
+});
+
+test('recovered outline is measured from current pixels and still needs boundaries and filling',()=>{
+  const width=240,height=180,box={x:85,y:48,width:70,height:34};
+  function image({filling=true,cap=true}={}){
+    const data=new Uint8ClampedArray(width*height*4);
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      let c=[110,110,110];
+      if(filling&&Math.abs(x-120)<34&&y>=82&&y<=97)c=[60,25,15];
+      if(filling&&((x-120)/35)**2+((y-104)/9)**2<1)c=[40,170,25];
+      if(cap&&((x-120)/35)**2+((y-65)/17)**2<1)c=[190,90,25];
+      if(cap&&[[100,62],[109,57],[108,70]].some(([a,b])=>Math.hypot(x-a,y-b)<2))c=[235,222,182];
+      data.set([...c,255],(y*width+x)*4);
+    }
+    return {width,height,data};
+  }
+  assert.equal(BurgerPose.detectCap(image()),null,'lopsided sesame remains invalid for global acquisition');
+  const found=BurgerPose.recoverCap(image(),box);
+  assert.ok(found);assert.ok(found.boundary.supported);assert.ok(found.contour.length>=6);
+  assert.ok(found.box.x>=84&&found.box.x<=87);
+  for(const frame of [image({filling:false}),image({cap:false})])assert.equal(BurgerPose.recoverCap(frame,box),null);
+  assert.equal(BurgerPose.recoverCap(image(),{...box,x:5}),null);
+  assert.equal(BurgerPose.recoverCap(image(),null),null);
 });
 
 test('alternating core estimates cannot move or indefinitely renew a held marker',()=>{

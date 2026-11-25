@@ -25,10 +25,11 @@
   }
   const agrees=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<=.06&&
     Math.abs(Math.log(a.scale/b.scale))<=.15&&Math.abs(a.elevation-b.elevation)<=10;
-  const CONFIRM_MS=180,CONFIRM_FRAMES=3;
+  const CONFIRM_MS=180,CONFIRM_FRAMES=3,CONFIRM_GAP_MS=250,CONFIRM_WINDOW_MS=500;
   class Tracker {
-    constructor({detect=input=>globalThis.BurgerPose.detectCap(input),visual=null,geometry=null}={}){
+    constructor({detect=input=>globalThis.BurgerPose.detectCap(input),recover=(input,box)=>globalThis.BurgerPose.recoverCap(input,box),visual=null,geometry=null}={}){
       this.detect=detect;
+      this.recover=recover;
       this.visual=visual??new globalThis.BurgerVisual.Tracker({detect:()=>this.observe()});
       this.geometry=geometry??new globalThis.BurgerPose.Tracker({mode:'table'});
       this.reset();
@@ -47,16 +48,23 @@
         this.geometry.reset();this.anchor=null;this.pendingPose=null;this.exposure=null;this.confirmedExposure=null;this.blockedAt=null;
         return {...base,visual,geometryState:'not-evaluated',integration:'vision-6-game'};
       }
-      const observation=this.observe();
+      let observation=this.observe();
+      // Texture tracking supplies a search region, never an invented contour.
+      // Do not override a conflicting full detection or revive expired identity.
+      const localSearch=!observation&&visual.inlierPoints>=7&&
+        Number.isFinite(visual.lastDetectionAgeMs)&&visual.lastDetectionAgeMs<=3000;
+      if(localSearch)observation=this.recover(input,visual.targetBounds);
       const matched=observation&&sameTarget(visual.targetBounds,observation.box);
-      if(observation&&!matched)this.confirmedExposure=null;
+      if(observation&&!matched){this.confirmedExposure=null;this.pendingPose=null;}
+      if(this.pendingPose&&(timestampMs-this.pendingPose.last>CONFIRM_GAP_MS||
+        timestampMs-this.pendingPose.since>CONFIRM_WINDOW_MS))this.pendingPose=null;
       const fit=this.geometry.update(input,timestampMs,{capObservation:matched?observation:null,
         contourRecovery:!!matched&&!!this.anchor&&timestampMs-this.anchor.time<500});
       const continuingBlocked=this.blockedAt!==null&&timestampMs-this.blockedAt<=250;
       this.blockedAt=null;
       const result={...fit,displayPose:null,displayStatus:'none',displayOpacity:0,
         visual,geometryState:fit.reason,integration:'vision-6-game',
-        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry',capMethod:matched?observation.method:null}};
+        stabilization:{rawState:fit.modelAttackability,reason:'no-current-geometry',capMethod:matched?observation.method:null,localSearch}};
       if(fit.tracking==='found'&&fit.targetFound&&fit.pose&&fit.evidenceTimestampMs===timestampMs&&matched){
         // Current candidates can unanimously block a shot even while their
         // exact core location is being confirmed. This never grants a hit or
@@ -78,8 +86,8 @@
         if(accepted)this.pendingPose=null;
         else {
           if(!this.pendingPose||!agrees(local,this.pendingPose.local))
-            this.pendingPose={local,since:timestampMs,count:0};
-          this.pendingPose.count++;
+            this.pendingPose={local,since:timestampMs,last:timestampMs,count:0};
+          this.pendingPose.count++;this.pendingPose.last=timestampMs;
           accepted=this.pendingPose.count>=CONFIRM_FRAMES&&timestampMs-this.pendingPose.since>=CONFIRM_MS;
         }
         result.stabilization={...result.stabilization,
@@ -106,7 +114,9 @@
             displayPose:pose,displayStatus:'measured',displayOpacity:1,displayAgeMs:0,displayMotion:'current-contour'};
         }
       } else {
-        this.pendingPose=null;
+        // Only brief missing observations may preserve confirmation progress.
+        // They add no votes, grant no attacks, and cannot renew the display hold.
+        if(!['weak-model-fit','no-complete-cap'].includes(fit.reason))this.pendingPose=null;
         if(['uncertain-placement','continuity-rejected','multiple-targets'].includes(fit.reason))this.confirmedExposure=null;
       }
       this.exposure=null;
