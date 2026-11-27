@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a2033"><meta name="description" content="Long Caster Diner · Operation Lunch Break">
+  <title>Operation Lunch Break · Long Caster Diner</title>
+  <link rel="icon" href="./assets/lunch/wolf-burger.webp"><link rel="stylesheet" href="./style.css?v=fit2">
+</head>
+<body>
+<main id="app">
+  <section class="operation" id="operation" aria-labelledby="title">
+    <header class="mast"><span class="brand">LONG CASTER DINER</span><label><select class="language-select" aria-label="Language"><option value="auto">AUTO</option><option value="zh">简中</option><option value="ja">日本語</option><option value="en">EN</option></select></label></header>
+    <div class="hero"><img src="./assets/lunch/wolf-burger.webp" alt="" class="logo"><div class="mission-number">MISSION 01</div><p>OPERATION</p><h1 id="title">LUNCH BREAK</h1></div>
+    <footer class="op-foot"><button class="primary" id="brief-button">BRIEF</button><small>非官方同人制作</small></footer>
+  </section>
+  <section id="brief" class="brief screen" hidden aria-labelledby="brief-title">
+    <header class="mast"><button id="home" class="brand" aria-label="返回行动页">LONG CASTER DINER</button><span>MISSION 01</span></header>
+    <div class="brief-head"><h2 id="brief-title" tabindex="-1">BRIEFING</h2><p>OPERATION / LUNCH BREAK</p></div>
+    <div class="map-frame"><img class="map" src="./assets/lunch/briefing-tray.webp" alt="餐盘战术图，红色夹层为 CORE 目标"></div>
+    <div class="orders"><span class="kicker">MISSION OBJECTIVE</span><div class="objective"><h3>从侧面接近，给夹层加酱。</h3><p>对准露出的 CORE，长按喷射。</p></div>
+      <dl><div><dt>装备</dt><dd>KETCHUP</dd></div><div><dt>携带量</dt><dd>80 mL</dd></div></dl>
+      <button class="primary" id="start">SORTIE</button>
+      <div class="brief-links"><button class="text-button" id="demo">进入无相机演示</button><button class="text-button" id="more-options" aria-haspopup="dialog" aria-controls="brief-options">更多选项</button></div>
+    </div>
+    <p id="camera-error" role="status"></p>
+  </section>
+  <section id="mission" class="mission" hidden aria-label="加酱任务">
+    <video id="camera" muted autoplay playsinline></video><video id="local-video" muted playsinline></video>
+    <div id="demo-area" tabindex="0" aria-label="拖动桌面调整准星"><img id="demo-photo" src="./assets/lunch/demo-table.webp" draggable="false" alt=""></div><div class="vignette"></div>
+    <canvas id="model-debug" hidden></canvas><pre id="model-debug-info" hidden></pre>
+    <div class="telemetry"><div>SCORE <b id="score">000000</b></div><div>TARGET <span>CORE +400</span></div></div>
+    <div class="mission-name">LUNCH BREAK<small>MISSION 01</small></div>
+    <div class="heading" aria-hidden="true"><span>15</span><span>18</span><span>21</span></div>
+    <div class="radio"><span>AWACS &nbsp;Long Caster</span><p>≪ <span id="radio-text" aria-live="polite"></span> ≫</p></div>
+    <svg class="hud" viewBox="0 0 320 240" aria-hidden="true">
+      <defs><clipPath id="ladder-clip"><rect x="42" y="21" width="236" height="198"/></clipPath><pattern id="ticks" width="10" height="24" patternUnits="userSpaceOnUse"><path d="M0 1H9 M4 13H9"/></pattern></defs>
+      <path d="M23 26v188 M297 26v188"/><g fill="url(#ticks)" stroke="none"><rect x="14" y="29" width="9" height="182"/><rect x="297" y="29" width="9" height="182"/></g>
+      <path d="m12 117 6 3-6 3 m296-6-6 3 6 3"/><g clip-path="url(#ladder-clip)"><g transform="translate(160 120)"><g id="attitude-roll"><g id="attitude-pitch"></g></g></g></g>
+      <path class="sight" d="M140 120h10l5 4 4-4h2l4 4 5-4h10"/>
+    </svg>
+    <div class="target" id="target" aria-label="肉饼核心"><svg viewBox="0 0 50 48"><path class="shell" d="M2 24 13 4H37L48 24 37 44H13Z"/><path class="diamond" d="m25 12 12 12-12 12-12-12z"/><circle cx="25" cy="24" r="1.5"/></svg><b>CORE</b></div>
+    <canvas id="effects" aria-hidden="true"></canvas>
+    <div id="feedback" role="status"></div>
+    <div id="tracking-hint"></div>
+    <div class="radar" aria-hidden="true"><svg viewBox="0 0 80 80"><path d="M9 10H71L40 69Z"/><circle cx="40" cy="43" r="23"/><path class="plane" d="m40 59 4 9-4-2-4 2z"/><path id="blip" d="m0 -4 4 2v4l-4 2-4-2v-4z"/></svg></div>
+    <button id="open-settings" class="utility" aria-label="任务设置">☰</button>
+    <div class="sauce-control"><div class="equipment"><small>KETCHUP</small><b><span id="ml">80</span> mL</b>
+      <svg viewBox="0 0 30 57" aria-hidden="true"><path d="M13 1h3l2 11h3v6h-1v3l8 7v24l-3 3H4l-3-3V28l8-7v-3H8v-6h3z"/><path d="M8 16h13 M3 31l5-5 m18 5-5-5 M5 49h19"/></svg></div>
+      <button id="squeeze" aria-label="长按喷射">SQUEEZE</button></div>
+    <div id="video-controls" hidden><span id="video-time"></span><button id="video-play">播放</button><button id="video-replay">重播</button></div>
+    <div id="round-end" hidden><button id="again" class="hud-button">再来一份</button><button id="round-brief" class="hud-button">BRIEF</button></div>
+  </section>
+  <dialog id="brief-options" aria-labelledby="options-title"><div class="dialog-head"><h2 id="options-title">更多选项</h2><button data-close="brief-options" aria-label="关闭">×</button></div>
+    <div class="setting-row"><button id="choose-video">选择本地视频</button><button class="sound-switch">开启声音</button></div><p>摄像头和所选视频仅在本机使用，不上传。视频静音播放。</p>
+  </dialog>
+  <dialog id="settings"><div class="dialog-head"><h2>任务设置</h2><button data-close="settings" aria-label="关闭">×</button></div>
+    <label class="setting-row">Language <select class="language-select" aria-label="Language"><option value="auto">AUTO</option><option value="zh">简中</option><option value="ja">日本語</option><option value="en">EN</option></select></label>
+    <div class="setting-row"><button class="sound-switch">开启声音</button><button id="fullscreen">全屏</button></div>
+    <div class="setting-row"><span id="orientation-status"></span><button id="orientation-toggle">开启姿态感应</button></div>
+    <div class="setting-row"><button id="camera-toggle">开启摄像头</button><button id="change-video">选择／更换视频</button><button id="close-video" hidden>关闭视频</button></div>
+    <div id="simulation-controls"><span>演示状态</span><div class="setting-row"><button id="exposed">核心露出</button><button id="blocked">被面包遮挡</button><button id="unknown">角度不确定</button></div></div>
+    <details class="diagnostics"><summary>识别运行诊断</summary><p id="recognition-status"></p><label><input id="model-debug-toggle" type="checkbox">显示汉堡模型</label><pre id="ar-diagnostics"></pre><button id="export-diagnostics">导出诊断</button><p><a href="./ar/pose.html">ATTITUDE LAB</a> · <a href="./ar/vision.html">VISION LAB</a></p></details>
+    <div class="setting-row"><button id="reset">重置任务</button><button id="leave">BRIEF</button></div>
+  </dialog>
+  <div id="orientation-prompt" class="permission-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="orientation-title"><div><h2 id="orientation-title">让 HUD 跟着手机倾斜</h2><p>摄像头已开启。开启姿态感应后，刻度会随手机左右倾斜、抬起和放低而变化。</p><button id="orientation-allow">开启姿态感应</button><button id="orientation-skip">暂时跳过，使用静态 HUD</button></div></div>
+  <input id="video-file" type="file" accept="video/*" hidden>
+</main><script type="module" src="./app.js?v=fit2"></script></body></html>

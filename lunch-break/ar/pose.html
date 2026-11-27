@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111918"><title>汉堡 · 自动对齐与跟踪验证</title>
+<link rel="stylesheet" href="./validation.css?v=attitude-2">
+<style>
+a{color:#a7e4b7}.status strong{min-width:130px}#pose-metrics{font:13px monospace;color:#bdd7c6;line-height:1.8}.toolbar label{font-size:13px}#view{touch-action:manipulation}#playback #seek{min-width:120px}#empty{line-height:1.6;text-align:center;padding:20px}#model-info{font-size:12px}.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#b0c3b8;margin:10px 0}.legend span:before{content:'●';color:var(--c);margin-right:5px}#count{color:#9ab5a5;font-size:12px;line-height:1.8}#conditions{width:auto}
+#attitude-status{position:sticky;top:0;z-index:3;background:#14221e;padding:10px;border:1px solid #456353;font-size:13px;line-height:1.6}
+</style>
+<script defer src="./coarse-model.js?v=attitude-2"></script><script defer src="./attack-region-attitude.js?v=attitude-2"></script><script defer src="./table-attitude.js?v=attitude-2"></script><script defer src="./attitude-input.js?v=attitude-2"></script><script defer src="./pose-tracker-attitude.js?v=attitude-2"></script><script defer src="./core-display.js?v=attitude-2"></script><script defer src="./pose-validation.js?v=attitude-2"></script>
+</head>
+<body><main>
+  <header><h1>汉堡 · 自动对齐与跟踪验证</h1><a href="../?v=10">返回手机游戏 ↗</a></header><p>姿态验证 / attitude-2 · 日志 v3</p>
+  <p>固定模型尺寸，自动估计位置、大小和倾斜。连续跟踪会约束位置与大小的突变；短暂缺少证据时，最多保留核心位置半秒。本页不计分，也不提供攻击许可。</p>
+  <div class="toolbar"><label>场景 <select id="tracking-mode"><option value="table" selected>桌面直立（新实验）</option><option value="handheld">自由手持（原实验）</option></select></label><label><input id="cap" type="checkbox" checked> 显示检测到的面包边界</label></div>
+  <p>桌面模式假定汉堡直立，允许手机小幅侧倾（约 ±45°），不适用于倒放或大幅侧翻。顶视可用完整面包轮廓与芝麻定位，不要求露出夹心。粉色线是颜色检测后补全的边界候选，可能漏检或包含背景；彩色线是拟合模型。可隐藏模型单独检查边界。</p>
+  <div class="toolbar"><label class="file-button">打开本机照片／视频<input id="file" type="file" accept="image/*,video/*"></label><button id="camera">开启后置摄像头</button><button id="stop">停止</button><button id="fullscreen">全屏</button></div>
+  <p id="notice" role="status">素材只在本机处理，无 CDN、在线模型或云端上传。手机摄像头需可访问的 HTTPS 地址。</p>
+  <div class="toolbar"><button id="attitude" aria-pressed="false">开启姿态辅助</button><label><input id="attitude-apply" type="checkbox" checked> 将姿态用于桌面匹配（实验）</label></div>
+  <p id="attitude-status" role="status">姿态辅助未开启，使用视觉判断。开启后请将汉堡保持在画面中央；取消勾选可只记录感应数据。</p>
+  <p>姿态实验：汉堡直立放在水平桌面，将上面包保持在中央虚线圈内。只有显示“正在收到有效数据”且“手机姿态直接约束”才算生效；仅授权不代表生效。没有数据时请用 Safari 重试。照片、录像和自由手持模式仍用视觉判断。</p>
+  <div id="stage"><video id="video" playsinline muted hidden></video><img id="still" alt="本机验证照片" hidden><canvas id="view" width="960" height="540" aria-label="自动对齐画面，点击可限定重新寻找的范围"></canvas><div id="empty">选择现有照片或视频开始验证</div></div>
+  <div class="legend"><span style="--c:#ff66ec">检测边界候选</span><span style="--c:#ffb75c">模型上面包</span><span style="--c:#58d4ba">模型夹心</span><span style="--c:#e6cf88">模型下面包</span><span style="--c:#fff">白十字：模型内部中心</span></div>
+  <div class="toolbar" id="playback" hidden><button id="play">播放／暂停</button><input id="seek" type="range" min="0" max="1" step=".01" value="0" aria-label="视频进度"><span id="time">0.0 s</span><label>速度 <select id="speed"><option value=".5">0.5×</option><option value="1" selected>1×</option></select></label></div>
+  <div class="toolbar"><label>叠加 <select id="overlay"><option value="model">半透明模型</option><option value="wire">仅轮廓</option><option value="core">仅中心</option><option value="none">隐藏</option></select></label><label><input id="raw" type="checkbox"> 查看未平滑结果</label><button id="reset">重新寻找</button></div>
+  <div class="status"><strong id="tracking">等待画面</strong><span id="reason">—</span></div>
+  <div id="pose-metrics">—</div><p id="count">—</p>
+  <p id="timing">等待帧间隔与分析耗时记录</p>
+  <p id="region-status" role="status">小攻击区域：等待画面</p>
+  <p>小圆仍以夹心正中心为圆心，半径 2 mm。绿色／红色／黄色圆圈分别表示模型几何通过／被面包挡住／未知；这是几何预览，尚未检查手指或配件遮挡，不是实际攻击许可。暂定区域投影至少 15% 对应夹心才通过，2%–15% 为边界未知。</p>
+  <p id="model-info">固定候选：上／夹心／下高度 6.5／13.8／2.4 mm；直径 21.4／22.1／22.1 mm。</p>
+  <details><summary>记录当前帧与导出回放结果</summary><p>日志包含每次分析的状态、中心、姿态和素材时间，不含照片或视频。拟合分数及找到目标的帧数不代表识别准确率。</p>
+    <div class="toolbar"><label>目视核对 <select id="truth"><option value="aligned">中心与模型大致贴合</option><option value="wrong-center">中心明显偏移</option><option value="wrong-pose">中心尚可，姿态错误</option><option value="absent">目标不在画面</option><option value="occluded">手指遮挡，难以核对</option></select></label><button id="mark">记录此刻</button><button id="export">导出本段测试记录</button></div><span id="marks">0 条人工核对</span>
+  </details>
+  <details><summary>当前模块输出</summary><pre id="output"></pre></details>
+  <p class="footnote">这是正交投影拟合，不是已校准的三维姿态。虚线圈与淡出十字是未知状态，不代表识别到遮挡后的核心。缺少识别证据的前 0.25 秒可用可靠画面匹配辅助平移，随后停留淡出；总共最多 0.5 秒，不能攻击，不会延长旧证据的有效期（录像按素材时间计算）。暂停、切换素材和长时间丢失都会清除历史。模型不包含手指，几何遮挡预测不能直接作为命中判断。</p>
+</main></body></html>

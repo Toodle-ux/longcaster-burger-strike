@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>汉堡 · 视觉定位验证 vision-6</title><link rel="stylesheet" href="./validation.css?v=vision-6">
+<style>#state{position:sticky;top:0;z-index:3;background:#15251e;padding:10px;line-height:1.5}a{color:#a7e4b7}.legend{font-size:13px}#metrics{overflow-wrap:anywhere}</style>
+<script defer src="./coarse-model.js?v=vision-6"></script><script defer src="./pose-tracker-visual.js?v=vision-6"></script><script defer src="./visual-tracker.js?v=vision-6"></script><script defer src="./vision-validation.js?v=vision-6"></script></head>
+<body><main><header><h1>汉堡 · 视觉定位验证</h1><a href="./pose.html?v=attitude-2">姿态实验 ↗</a></header><p>视觉验证 / vision-6 · <a href="../?v=10">返回手机游戏 ↗</a></p>
+<p>这一页只验证上面包的图像定位与连续跟踪。白十字是面包视觉锚点，不是夹心几何中心；没有手机姿态、模型角度、显示平滑或攻击判定。</p>
+<div class="toolbar"><label class="file-button">打开本机照片／视频<input id="file" type="file" accept="image/*,video/*"></label><button id="camera">开启后置摄像头</button><button id="stop">停止</button><button id="reset">重新寻找</button></div>
+<p id="notice">素材只在本机处理。手机相机需要 HTTPS。</p>
+<div id="state" role="status">等待画面</div>
+<div id="stage"><video id="video" playsinline muted hidden></video><img id="still" hidden alt="本机照片"><canvas id="view" width="640" height="360"></canvas></div>
+<p class="legend"><span style="color:#ff79df">粉色：本次检测轮廓</span> · <span style="color:#77edc5">绿色：上面包跟踪范围</span> · 白点：面包特征 · <span style="color:#72ccff">蓝点：夹层辅助特征</span>。粉色轮廓只在检测实际运行时显示。</p>
+<div class="toolbar"><label><input id="compare" type="checkbox">每帧显示检测对照（增加计算量）</label><button id="play" hidden>播放／暂停</button><input id="seek" hidden type="range" min="0" max="1" step=".01" value="0" aria-label="录像进度"></div>
+<p id="metrics">等待分析</p>
+<p>位置、大小来自当前图像匹配，不做显示滤波。已锁定目标可用面包与夹层关系、参考外观和纹理匹配作短时局部确认；局部确认不能初始化目标，距离上次完整检测最多续踪 3 秒。证据不足仍报未知／丢失。更平稳的输出不自动代表更准确。</p>
+<p>平视时可借用少量可见夹层特征，但仍需面包特征匹配，不要求下面包露出。若面包模糊，请停稳或稍微拉远后观察；本页不检测手机是否已经对焦。</p>
+<p>平视检测会核对包含橙色、黄色与亮斑的面包外轮廓及下方夹层。面包与芝士相连时，只有图像中能找到横向暗边才尝试分开；轮廓不足仍可能漏检。</p>
+<p>允许左右其中一侧较弱，但仍需该侧的部分边界、其余三边和下方夹层共同支持。完全看不清边界时不会仅凭颜色补出目标。</p>
+<details><summary>导出全部测试记录／添加人工备注</summary>
+<p>“导出全部记录”包含本段所有分析结果，不按下方选项筛选。人工备注是可选的，不点击“记录此刻”也可以直接导出。</p>
+<div class="toolbar"><select id="truth" aria-label="人工备注"><option value="aligned">面包位置大致贴合</option><option value="wrong-target">漂移或认错对象</option><option value="missed">汉堡可见但漏检</option><option value="absent">汉堡不可见</option></select><button id="mark">记录此刻</button><button id="export">导出全部记录</button></div><span id="marks">0 条人工备注</span></details>
+<details><summary>模块输出</summary><pre id="output"></pre></details>
+<p class="footnote">仅针对单个汉堡的实验，未解决多目标身份与夹心遮挡。现有素材兼作开发验证，手机实时表现需要另测。</p>
+</main></body></html>
