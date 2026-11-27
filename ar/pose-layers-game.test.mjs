@@ -47,3 +47,54 @@ test('local cap refinement follows the shaded outer rim, including when the imag
   assert.equal(BurgerPose.refineCap({width,height,data},observation),observation,'no image boundary cannot manufacture a measured contour');
  }
 });
+
+test('a colour proposal outside the real edge can shrink to current image boundaries',()=>{
+ const width=200,height=150,data=new Uint8ClampedArray(width*height*4);
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++)
+  data.set([...((x-100)**2/42**2+(y-65)**2/25**2<=1?[190,90,30]:[210,215,213]),255],(y*width+x)*4);
+ const contour=Array.from({length:32},(_,i)=>({x:100+50*Math.cos(i*Math.PI/16),y:65+30*Math.sin(i*Math.PI/16)}));
+ const observed={contour,box:{x:50,y:35,width:100,height:60}},r=BurgerPose.refineCap({width,height,data},observed);
+ assert.ok(r.refinement);assert.ok(r.box.width>80&&r.box.width<90);
+ assert.ok(r.box.height>47&&r.box.height<56);
+});
+
+test('visible layer sides do not bridge an adjacent disconnected dark cup',()=>{
+ const input=frame();
+ for(let y=58;y<=69;y++)for(let x=148;x<=170;x++)input.data.set([60,25,15,255],(y*input.width+x)*4);
+ const layers=BurgerPose.observeLayers(input,contour);
+ assert.equal(layers.sides.length,2);
+ assert.deepEqual(layers.sides.map(s=>[s.left,s.right]),[[60,140],[60,140]]);
+});
+
+test('disconnected orange islands inside a cap bounding box cannot enter its contour',()=>{
+ const width=240,height=180,data=new Uint8ClampedArray(width*height*4);
+ const spots=[[-16,-14],[0,-18],[15,-10],[-12,12],[5,15],[19,14]];
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+  const u=x-100,v=y-75;let rgb=[110,110,110];
+  if(Math.hypot(u,v)<40)rgb=[180,75,25];
+  if(spots.some(([sx,sy])=>Math.hypot(u-sx,v-sy)<2))rgb=[235,222,182];
+  data.set([...rgb,255],(y*width+x)*4);
+ }
+ const clean=BurgerPose.detectCap({width,height,data});assert.ok(clean);
+ for(const [cx,cy] of [[63,38],[137,38],[63,112],[137,112]])
+  for(let y=cy-1;y<=cy+1;y++)for(let x=cx-1;x<=cx+1;x++)data.set([180,75,25,255],(y*width+x)*4);
+ const cluttered=BurgerPose.detectCap({width,height,data});
+ assert.deepEqual(cluttered.contour,clean.contour);assert.deepEqual(cluttered.box,clean.box);
+});
+
+test('a one-mask lateral background attachment does not enlarge the cap',()=>{
+ const width=320,height=200,data=new Uint8ClampedArray(width*height*4);
+ const spots=[[-16,-14],[0,-18],[15,-10],[-12,12],[5,15],[19,14]];
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+  const u=x-130,v=y-85;let rgb=[110,110,110];
+  if(Math.hypot(u,v)<40)rgb=[180,75,25];
+  if(spots.some(([sx,sy])=>Math.hypot(u-sx,v-sy)<2))rgb=[235,222,182];
+  data.set([...rgb,255],(y*width+x)*4);
+ }
+ const input={width,height,data},clean=BurgerPose.detectCap(input);assert.ok(clean);
+ for(let y=77;y<=92;y++)for(let x=167;x<=190;x++)
+  if(Math.hypot(x-130,y-85)>=40)data.set([180,112,25,255],(y*width+x)*4);
+ const attached=BurgerPose.detectCap(input);assert.ok(attached);
+ assert.deepEqual(attached.box,clean.box);
+ assert.deepEqual(attached.contour,clean.contour);
+});

@@ -16,6 +16,8 @@
     // split of the remaining 5 mm and the two other diameters are assumptions.
     measured:{upperHeight:3.5,fillingHeight:18,lowerHeight:1.5,upperDiameter:20,fillingDiameter:22,lowerDiameter:20}
   };
+  // Game-only profile trial. Width, total height, filling and core stay in millimetres.
+  presets.game=Object.freeze({...presets.candidate,crownPower:3,fillingBevel:true});
   const radians = degrees => degrees*Math.PI/180;
   function rotate([x,y,z], pose) {
     const a=radians(pose.elevation), b=radians(pose.roll);
@@ -46,10 +48,14 @@
     const r=d.upperDiameter/2,h=d.upperHeight;
     const crown=[[0,half],[r*.94,half],[r,half+h*.16]];
     for(let i=1;i<=12;i++) {
-      const t=i/12*Math.PI/2;crown.push([r*Math.cos(t),half+h*(.16+.84*Math.sin(t))]);
+      const t=i/12*Math.PI/2,exponent=2/(d.crownPower??2);
+      const ringRadius=d.crownPower&&i===12?0:r*Math.cos(t)**exponent;
+      crown.push([ringRadius,half+h*(.16+.84*Math.sin(t)**exponent)]);
     }
     revolve(crown,'upper');
-    revolve([[0,-half],[d.fillingDiameter/2,-half],[d.fillingDiameter/2,half],[0,half]],'filling');
+    const rf=d.fillingDiameter/2;
+    const bottom=d.fillingBevel?[[rf*.76,-half],[rf*.88,-half*.85],[rf*.97,-half*.55],[rf,-half*.25]]:[[rf,-half]];
+    revolve([[0,-half],...bottom,[rf,half],[0,half]],'filling');
     const rb=d.lowerDiameter/2,y=-half,hl=d.lowerHeight;
     revolve([[0,y-hl],[rb*.86,y-hl],[rb*.98,y-hl*.78],[rb,y-hl*.35],[rb*.97,y],[0,y]],'lower');
     rings.push({radius:r*.94,y:half,part:'upper'},{radius:rb*.97,y:-half,part:'lower'});

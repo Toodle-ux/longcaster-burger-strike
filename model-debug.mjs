@@ -1,6 +1,6 @@
-import './ar/coarse-model.js?v=20';
-import './ar/attack-region-game.js?v=20';
-import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=20';
+import './ar/coarse-model.js?v=158';
+import './ar/attack-region-game.js?v=158';
+import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=158';
 
 // Read-only view of the same model/pose used by the Worker. Never feeds back
 // into tracking or permission; the gameplay marker has separate UI smoothing.
@@ -30,7 +30,7 @@ function hull(points){
 }
 
 export function createModelDebug({canvas,info,toggle,t}){
-  const api=globalThis.BurgerModel,model=api.mesh(api.presets.candidate),ctx=canvas.getContext('2d');
+  const api=globalThis.BurgerModel,model=api.mesh(api.presets.game),ctx=canvas.getContext('2d');
   const parts=['upper','filling','lower'].map(part=>({part,
     vertices:[...new Set(model.faces.filter(f=>f.part===part).flatMap(f=>f.ids))].map(i=>model.vertices[i])}));
   let lastKey='';

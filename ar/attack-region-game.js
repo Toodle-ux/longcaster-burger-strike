@@ -7,7 +7,7 @@
  */
 (() => {
   const RULE=Object.freeze({radiusMm:2,minFillingFraction:.15,maxBlockedFillingFraction:.02,sampleStepMm:.25});
-  const model=globalThis.BurgerModel,mesh=model.mesh(model.presets.candidate),cache=new Map();
+  const model=globalThis.BurgerModel,mesh=model.mesh(model.presets.game),cache=new Map();
   // Gameplay calibration in model millimetres (+Y is up), not screen pixels.
   // Keep fitting the unchanged mesh at its origin; all core consumers share this offset.
   const CORE=Object.freeze([0,-1,0]);
