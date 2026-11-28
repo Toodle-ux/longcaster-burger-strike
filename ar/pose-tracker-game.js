@@ -443,7 +443,7 @@
     return {...candidate,sesame,method:'current-edges-on-track'};
   }
   function refineCap(input,observation){
-    if(observation?.refinement?.method==='closed-edge')return observation;
+    if(observation?.refinement?.method==='closed-edge'||observation?.refinement?.method==='measured-reflected-rim')return observation;
     const traced=traceCrown(input,observation);if(traced)return traced;
     if(!observation?.contour||observation.contour.length<6)return observation;
     const {data,width,height}=input,outline=observation.contour,w=observation.box.width;
@@ -519,12 +519,19 @@
     // Start broad to retain the orange rim. Tighten only when it merges with
     // the wooden background; a single strict threshold clips the crown and
     // can itself turn an oblique view into a falsely shallow one.
-    const proposals=[];
+    const proposals=[],fragments=[],large=[];
     for(const redRatio of [1.48,1.65,1.8,1.95]){
     const candidates=[];
     for(const q of capRegions(input,frame,redRatio)){
       const w=q.right-q.left+1,h=q.bottom-q.top+1;
-      if(w<20||w>frame.w*.4||h/w<.22||h/w>1.25||q.count/(w*h)<.42)continue;
+      if(w>frame.w*.4){
+        if(h/w>=.7&&h/w<=1.14&&q.count/(w*h)>.57&&q.left>2&&q.top>2&&q.right<frame.w-3&&q.bottom<frame.h-3){
+          const sesame=sesameEvidence(frame,q,whites);
+          if(sesame.strong&&sesame.count>=7&&sesame.spanX>=.48&&sesame.offsetX<=.12)large.push({...q,redRatio,sesame,width:w});
+        }
+        continue;
+      }
+      if(w<20||h/w<.22||h/w>1.25||q.count/(w*h)<.42)continue;
       // A complete cap cannot run out of the frame. Large wood patches used
       // to borrow a small nearby lettuce component as supporting evidence.
       if(q.left<=1||q.top<=1||q.right>=frame.w-2||q.bottom>=frame.h-2)continue;
@@ -563,7 +570,14 @@
       // a convex bridge across orange background must still be rejected.
       if(!recoveryBox&&bridges.length&&!(green&&h/w<.6&&
         confirmCap(input,{x:q.left,y:q.top,width:w,height:h}).supported&&
-        bridges.every(p=>supportedTopEdge(frame,p,outline[(outline.indexOf(p)+1)%outline.length],q))))continue;
+        bridges.every(p=>supportedTopEdge(frame,p,outline[(outline.indexOf(p)+1)%outline.length],q)))){
+        if(green&&bridges.length===1){
+          const a=bridges[0],b=outline[(outline.indexOf(a)+1)%outline.length];
+          if(b.x-a.x>w*.32&&(a.y+b.y)/2<q.top+h*.56)
+            fragments.push({...q,points:outline,width:w,green,redRatio,sesame});
+        }
+        continue;
+      }
       const edge=recoveryBox?sideBoundaryEvidence(input,frame,outline,q):null;
       // Existing texture identity can replace sesame distribution only when
       // CURRENT boundaries and filling support the whole observed cap.
@@ -591,8 +605,181 @@
     for(const q of proposals)q.maskSupport=proposals.filter(p=>p!==q&&overlap(p,q)>.65&&
       Math.min(p.width,q.width)/Math.max(p.width,q.width)>.85).length;
     proposals.sort((a,b)=>Number(b.maskSupport>0)-Number(a.maskSupport>0)||b.count-a.count);
-    return proposals[0]??null;
+    const ordinary=proposals[0];
+    if(!ordinary)return recoverReflectedRim(input,fragments)??largeMarkedCrown(input,frame,large);
+    // A very strict mask can accept the orange interior of the same cap for
+    // which other masks measured a split rim. Compare their current edges.
+    const nearby=fragments.filter(q=>Math.abs(q.left-ordinary.left)+Math.abs(q.right-ordinary.right)<q.width*.27&&
+      Math.abs(q.y-ordinary.y)<q.width*.2);
+    const split=nearby.length>1?recoverReflectedRim(input,nearby):null;
+    return split?{...ordinary,alternativeRim:split.measuredRim}:ordinary;
   }
+  function opticalSectors(input,observation){
+    const {box,contour}=observation,w=box.width,h=box.height,d=Math.max(1,w*.012);
+    const sums=Array(8).fill(0),counts=Array(8).fill(0);
+    const rgb=(x,y)=>{
+      x=Math.round(x);y=Math.round(y);
+      if(x<0||x>=input.width||y<0||y>=input.height)return null;
+      const k=4*(y*input.width+x),p=input.data;return [p[k],p[k+1],p[k+2]];
+    };
+    for(let i=0;i<contour.length;i++){
+      const a=contour[i],b=contour[(i+1)%contour.length],dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy);
+      if(L<.1)continue;
+      const nx=dy/L,ny=-dx/L,N=Math.ceil(L/Math.max(2,w*.025));
+      for(let j=0;j<N;j++){
+        const u=(j+.5)/N,x=a.x+dx*u,y=a.y+dy*u;
+        const ix=(x-box.x)/w-.5,iy=(y-box.y)/h-.5;
+        const k=(Math.floor((Math.atan2(iy,ix)+Math.PI/8)/(Math.PI/4))+8)%8;
+        const v=[-2,-1,1,2].map(t=>rgb(x+t*d*nx,y+t*d*ny));
+        if(v.some(q=>!q))continue;
+        const g=v[1].map((c,i)=>c-v[2][i]),large=v[0].map((c,i)=>c-v[3][i]);
+        const strength=Math.hypot(...g),direction=g.reduce((u,c,i)=>u+c*large[i],0)/Math.max(1,strength);
+        // The same edge must survive both sampling apertures.
+        const support=Math.min(1,Math.max(0,(Math.min(strength,direction*.8)-7)/34));
+        sums[k]+=support*L/N;counts[k]+=L/N;
+      }
+    }
+    return sums.map((x,i)=>x/Math.max(1,counts[i]));
+  }
+  function warmFrontEdge(input,observation){
+    const w=observation.box.width,d=Math.max(2,Math.round(.025*w)),points=observation.contour;
+    const xs=[],rgb=input.data;
+    const hue=(x,y)=>{
+      if(x<0||x>=input.width||y<0||y>=input.height)return NaN;
+      const i=4*(y*input.width+x),r=rgb[i],g=rgb[i+1],b=rgb[i+2];
+      return r>b+34?(g-b)/(r-b):NaN;
+    };
+    for(let j=0;j<19;j++){
+      const x=Math.round(observation.box.x+w*(.17+.66*j/18));
+      let low=-Infinity;
+      for(let i=0;i<points.length;i++){
+        const a=points[i],b=points[(i+1)%points.length];
+        if((a.x<=x)!==(b.x<=x))low=Math.max(low,a.y+(x-a.x)*(b.y-a.y)/(b.x-a.x));
+      }
+      if(!Number.isFinite(low))continue;
+      const y=Math.round(low),above=hue(x,y-d),below=hue(x,y+d);
+      const behind=hue(x,y-2*d),ahead=hue(x,y+Math.round(1.5*d));
+      // The lower edge shares brightness with the cheese. Across two
+      // apertures the upper warm material must give way to a yellower layer.
+      if(below-above>.065&&ahead-behind>.11&&ahead>below-.045&&above>behind-.045)xs.push(x);
+    }
+    return xs.length>=12&&xs.at(-1)-xs[0]>=w*.45;
+  }
+
+  function largeMarkedCrown(input,frame,proposals){
+    // A close crown can fill most of the image and hide the lower bun.
+    // Three independent chroma proposals must contain the same markings
+    // and locate both outer flanks, followed by four current optical edges.
+    const ranked=proposals.map(q=>({q,votes:new Set(proposals.filter(p=>
+      Math.abs(p.left-q.left)+Math.abs(p.right-q.right)<q.width*.065&&
+      Math.abs(p.top-q.top)<q.width*.07&&Math.abs(p.bottom-q.bottom)<q.width*.12).map(p=>p.redRatio)).size}));
+    ranked.sort((a,b)=>b.votes-a.votes||b.q.count-a.q.count);
+    const item=ranked[0];if(!item||item.votes<3)return null;
+    const q=item.q,contour=hull(q.rows.flatMap(r=>[{x:r.left,y:r.y},{x:r.right,y:r.y}]));
+    const box={x:q.left,y:q.top,width:q.width,height:q.bottom-q.top+1};
+    const measured=traceCrown(input,{contour,box,sesame:q.sesame,method:'large-marked-crown'});
+    if(!measured||measured.refinement.supportedFraction<.83)return null;
+    const b=bounds(measured.contour);
+    if(b.left<2||b.right>=frame.w-2||b.top<2||b.bottom>=frame.h-2)return null;
+    if(Math.abs(b.left-q.left)+Math.abs(b.right-q.right)>.12*q.width)return null;
+    const rim=reflectedRim(input,measured);
+    if(!rim||!warmFrontEdge(input,rim))return null;
+    const edges=opticalSectors(input,rim);
+    if(Math.min(edges[0],edges[4],edges[6])<.72||Math.min(edges[1],edges[3])<.38)return null;
+    const cap={...rim,sesame:q.sesame,method:'large-marked-crown'};
+    return {...q,points:cap.contour,width:cap.box.width,measuredRim:cap};
+  }
+
+  // A window reflection can cross the upper silhouette. Fit a search arc
+  // between the observed flanks, then retain only peaks on the current RGB edge.
+  function reflectedRim(input,observation){
+    const {width,height,data}=input,poly=observation.contour;
+    const left=poly.reduce((a,p)=>p.x<a.x?p:a),right=poly.reduce((a,p)=>p.x>a.x?p:a);
+    const w=right.x-left.x,tilt=(right.y-left.y)/w;
+    const d=Math.max(1.5,w*.01),reach=Math.max(2,Math.round(w*.017));
+    const columns=Array.from({length:36},(_,i)=>{
+      const u=-.93+1.86*i/35;
+      return {x:left.x+w*(u+1)/2,y:left.y+(right.y-left.y)*(u+1)/2,u,arc:Math.sqrt(1-u*u)};
+    });
+    const ix=(x,y)=>(Math.round(y)*width+Math.round(x))*4;
+    const contrast=(x,y,nx,ny)=>{
+      const a=ix(x+nx*d,y+ny*d),b=ix(x-nx*d,y-ny*d);
+      return Math.hypot(data[a]-data[b],data[a+1]-data[b+1],data[a+2]-data[b+2]);
+    };
+    let best=null;
+    for(let rise=w*.17;rise<=w*.65;rise+=Math.max(1,w*.009)){
+      const groups=[0,0,0,0,0,0],points=[];let direct=0;
+      for(let i=0;i<columns.length;i++){
+        const col=columns[i],x=col.x,y=col.y-rise*col.arc;
+        if(x<d+reach+1||y<d+reach+1||x>=width-d-reach-1||y>=height-d-reach-1)break;
+        const slope=tilt+2*rise*col.u/(w*col.arc),norm=Math.hypot(1,slope),nx=-slope/norm,ny=1/norm;
+        let peak=-Infinity,offset=0;
+        for(let j=-reach;j<=reach;j++){
+          const score=contrast(x+nx*j,y+ny*j,nx,ny)-2*Math.abs(j);
+          if(!j)direct+=clamp((score-8)/50,0,1);
+          if(score>peak){peak=score;offset=j;}
+        }
+        groups[Math.floor(i/6)]+=clamp((peak-8)/50,0,1)/6;
+        if(peak>=20)points.push({x:x+nx*offset,y:y+ny*offset});
+      }
+      if(points.length<26)continue;
+      groups.sort((a,b)=>a-b);
+      const merit=.5*groups.reduce((a,b)=>a+b,0)/6+.35*(groups[1]+groups[2])/2+.15*direct/columns.length;
+      if(!best||merit>best.merit)best={merit,points};
+    }
+    if(!best||best.merit<.74)return null;
+    const contour=hull([...poly,...best.points]),bb=bounds(contour);
+    return {...observation,contour,box:{x:bb.left,y:bb.top,width:bb.right-bb.left,height:bb.bottom-bb.top},
+      method:'reflected-rim',refinement:{method:'measured-reflected-rim',supportedFraction:best.points.length/columns.length}};
+  }
+
+  function upperY(contour,x){
+    let top=Infinity;
+    for(let i=0;i<contour.length;i++){
+      const a=contour[i],b=contour[(i+1)%contour.length];
+      if(x<Math.min(a.x,b.x)||x>Math.max(a.x,b.x)||a.x===b.x)continue;
+      top=Math.min(top,a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x));
+    }
+    return top;
+  }
+  function reflectionPixel(input,x,y){
+    if(x<0||x>=input.width||y<0||y>=input.height)return false;
+    const k=(Math.round(y)*input.width+Math.round(x))*4,r=input.data[k],g=input.data[k+1],b=input.data[k+2];
+    return Math.max(r,g,b)>125&&g>r*.78&&b>r*.74&&b>g*.86;
+  }
+  function containsReflection(input,observed){
+    const b=observed.box;
+    let count=0;
+    for(let i=1;i<16;i++){
+      const x=b.x+b.width*i/16,y=upperY(observed.contour,x);
+      if([-.06,-.025,.01,.05].some(v=>reflectionPixel(input,x,y+v*b.width)))count++;
+    }
+    return count>=3;
+  }
+  function visibleReflectionBetween(input,old,measured){
+    const box=old.box;let span=0,longest=0;
+    for(let i=2;i<30;i++){
+      const x=box.x+box.width*i/32,y=upperY(measured.contour,x),end=upperY(old.contour,x);
+      const gap=end-y;
+      const pale=gap>box.width*.024&&[.25,.5,.75].some(v=>reflectionPixel(input,x,y+gap*v));
+      span=pale?span+1:0;longest=Math.max(longest,span);
+    }
+    return longest>=4;
+  }
+
+  function recoverReflectedRim(input,fragments){
+    const choices=fragments.filter(q=>fragments.some(p=>p!==q&&p.redRatio!==q.redRatio&&
+      Math.abs(q.left-p.left)+Math.abs(q.right-p.right)<q.width*.12));
+    choices.sort((a,b)=>b.count-a.count);
+    const q=choices[0];if(!q)return null;
+    const box={x:q.left,y:q.top,width:q.width,height:q.bottom-q.top+1};
+    const traced=traceCrown(input,{box,contour:q.points,hasFilling:true,sesame:q.sesame});
+    if(!traced||traced.refinement.supportedFraction<.8||!confirmCap(input,traced.box).supported)return null;
+    const rim=reflectedRim(input,traced);if(!rim)return null;
+    return {...q,points:rim.contour,width:rim.box.width,measuredRim:rim};
+  }
+
+
   function supportedTopEdge(frame,a,b,box){
     const w=box.right-box.left+1,h=box.bottom-box.top+1,dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);
     if(Math.abs(dy)>Math.abs(dx)*.35||(a.y+b.y)/2>box.top+h*.45)return false;
@@ -716,7 +903,11 @@
     return {labels,gray,w:width,h:height};
   }
   const sesameComponents=new WeakMap();
+  const fillingComponents=new WeakMap();
+  const interiorGreenRows=new WeakMap();
   function components(frame,label,minimum,captureRows=false) {
+    const filling=label===GREEN&&minimum===5&&!captureRows;
+    if(filling&&fillingComponents.has(frame.labels))return fillingComponents.get(frame.labels);
     const sesame=label===WHITE&&minimum===1&&!captureRows;
     if(sesame&&sesameComponents.has(frame.labels))return sesameComponents.get(frame.labels);
     const {labels,w,h}=frame,seen=new Uint8Array(w*h),queue=new Int32Array(w*h),out=[];
@@ -744,9 +935,20 @@
         }
         out.push({x:sx/tail,y:sy/tail,count:tail,left,right,top,bottom,
           xx:xx/tail-(sx/tail)**2,yy:yy/tail-(sy/tail)**2,xy:xy/tail-sx*sy/tail**2,...(rows?{rows}:{})});
+        if(filling&&right-left>=20){
+          const lower=new Int32Array(right-left+1);lower.fill(-1);
+          for(let j=0;j<tail;j++){
+            const k=queue[j],x=k%w;
+            if(x<=0||x>=w-1||labels[k-1]!==GREEN||labels[k+1]!==GREEN||
+                labels[k-w]!==GREEN||labels[k+w]!==GREEN)continue;
+            lower[x-left]=Math.max(lower[x-left],Math.floor(k/w));
+          }
+          interiorGreenRows.set(out.at(-1),lower);
+        }
       }
     }
     out.sort((a,b)=>b.count-a.count);
+    if(filling)fillingComponents.set(labels,out);
     if(sesame)sesameComponents.set(labels,out);
     return out;
   }
@@ -1624,6 +1826,96 @@
       return u>=0&&u<frame.w&&v>=0&&v<frame.h?v*frame.w+u:-1;
     };
     const rgb=input.data,colors=[],old=previous&&time-previous.time<=250?previous:null;
+    // The centre cannot borrow exposed cheese from the edge of its disk.
+    // Check whether a different surface cuts a coloured layer between both flanks.
+    const distance=(i,j)=>(rgb[4*i]-rgb[4*j])**2+(rgb[4*i+1]-rgb[4*j+1])**2+(rgb[4*i+2]-rgb[4*j+2])**2;
+    function cutLayer(y){
+      const left=at(-2,y),right=at(2,y),label=frame.labels[left];
+      if((label!==YELLOW&&label!==GREEN)||label!==frame.labels[right])return false;
+      if(distance(left,right)>=40**2)return false;
+      // The moulded cheese can enter the bun's shadow at its centre.
+      // Test a change of intensity on the same pigment before calling it a cut.
+      function samePigment(i,j){
+        const a=i*4,b=j*4;
+        const norm=rgb[a]**2+rgb[a+1]**2+rgb[a+2]**2;
+        if(norm<40**2)return false;
+        const flank=rgb[b]**2+rgb[b+1]**2+rgb[b+2]**2;
+        const dot=rgb[a]*rgb[b]+rgb[a+1]*rgb[b+1]+rgb[a+2]*rgb[b+2];
+        return dot*dot>=.97*norm*flank;
+      }
+      const differentSurface=x=>{
+        const i=at(x,y),v=frame.labels[i];
+        return (v===DARK||v===NONE)&&distance(i,left)>40**2&&distance(i,right)>40**2&&
+          !samePigment(i,left)&&!samePigment(i,right);
+      };
+      // A foreground edge may pass through one half of the disk.
+      const mid=at(0,y),v=frame.labels[mid];
+      if((v!==DARK&&v!==NONE)||distance(mid,left)<=40**2||distance(mid,right)<=40**2)return false;
+      // Near black a single pixel has little colour information. Use the
+      // neighbouring samples to decide whether the shaded pigment continues.
+      return [-.375,0,.375].filter(differentSurface).length>=2;
+    }
+    // The textured top of an occluder can be as bright as the cheese.
+    // Compare texture along the same layer at the centre and on both flanks.
+    function interruptedTexture(y){
+      const l=at(-2,y),r=at(2,y),mid=at(0,y),label=frame.labels[l];
+      if((label!==YELLOW&&label!==GREEN)||frame.labels[r]!==label||distance(l,r)>=40**2||
+        frame.labels[mid]===label&&Math.min(distance(mid,l),distance(mid,r))<40**2)return false;
+      const half=Math.floor(radius/2);
+      // A single reflection rises to one maximum, then falls. Subtract
+      // that brightness change before comparing texture on the three strips.
+      function detailBeyondGlint(x){
+        let first=0,last=0,peak=0,variation=0;
+        for(let j=-half;j<=half;j++){
+          const i=at(x+j/radius,y);
+          if(i<0)return null;
+          const value=frame.gray[i];
+          if(j===-half)first=value;
+          else variation+=Math.abs(value-last);
+          peak=Math.max(peak,value);last=value;
+        }
+        return variation-(peak-first)-(peak-last);
+      }
+      const detail=detailBeyondGlint(0);
+      if(detail===null||detail<=40)return false;
+      return [-2,2].every(x=>{
+        const side=detailBeyondGlint(x);
+        return side!==null&&side<detail/4;
+      });
+    }
+    if(interruptedTexture(0)&&(interruptedTexture(-.25)||interruptedTexture(.25)))return null;
+    // Follow the central dark surface only while it stays connected to
+    // the aim point. A cut along its rim can also identify a covered patty.
+    const middle=frame.labels[at(0,0)];
+    if(middle===DARK||middle===NONE){
+      // If a textured object interrupts the cheese above the aim point
+      // and also cuts the lettuce below it, the dark centre between those
+      // two intersections cannot establish a visible patty on its own.
+      let previous=false;
+      for(let step=1;step<=8;step++){
+        const y=-step*.25;
+        const cut=frame.labels[at(-2,y)]===YELLOW&&interruptedTexture(y);
+        if(cut&&previous){
+          for(let below=1;below<=8;below++){
+            const low=below*.25;
+            if(frame.labels[at(-2,low)]===GREEN&&cutLayer(low))return null;
+          }
+          break;
+        }
+        previous=cut;
+      }
+      const centralCut=cutLayer(0);
+      for(const direction of [-1,1]){
+        let previousCut=centralCut;
+        for(let step=1;step<=4;step++){
+          const y=direction*step*.25,label=frame.labels[at(0,y)];
+          if(label!==DARK&&label!==NONE)break;
+          const cut=cutLayer(y);
+          if(previousCut&&cut)return null;
+          previousCut=cut;
+        }
+      }
+    }
     let supported=0,stable=0,brightCount=0,brightMatches=0,bilateralBright=0;
     for(const y of [-.75,-.375,0,.375,.75]){
       const sides=[-1,1].map(side=>[1.75,2.25,2.75].flatMap(dx=>
@@ -1675,7 +1967,33 @@
     }
     // Dark cola can match the last patty colour. Reuse that measurement
     // only when coloured filling in the current disk continues to a flank.
-    return brightMatches>0&&old&&stable>colors.length/2?old:null;
+    if(!old||stable<=colors.length/2)return null;
+    if(brightMatches)return old;
+    // A stripe may be visible above a covered aim point. Check the actual
+    // centre against both current flanks and its last measured colour.
+    const aim=at(0,0),near=(i,r,g,b)=>i>=0&&(rgb[4*i]-r)**2+(rgb[4*i+1]-g)**2+(rgb[4*i+2]-b)**2<40**2;
+    const priorCentre=old.colors[Math.floor(old.colors.length/2)];
+    if(!near(aim,...priorCentre))return null;
+    const matchesFlank=sign=>[1.75,2.25,2.75].some(x=>near(at(sign*x,0),rgb[4*aim],rgb[4*aim+1],rgb[4*aim+2]));
+    if(!matchesFlank(-1)||!matchesFlank(1))return null;
+    // A thin stripe can fall entirely between the five sample rows. Follow
+    // a two-pixel-thick bridge of the same ingredient across the current
+    // disk to both flanks, allowing one pixel of slope per image column.
+    const halfHeight=Math.floor(.85*radius),halfWidth=Math.ceil(2*radius);
+    if(halfHeight<2)return null;
+    let before=new Uint8Array(2*halfHeight+2),now=new Uint8Array(before.length);
+    for(let dx=-halfWidth;dx<=halfWidth;dx++){
+      let any=false;
+      for(let dy=-halfHeight,i=1;dy<halfHeight;dy++,i++){
+        const label=frame.labels[at(dx/radius,dy/radius)];
+        const linked=dx===-halfWidth||before[i-1]===label||before[i]===label||before[i+1]===label;
+        now[i]=linked&&(label===YELLOW||label===GREEN)&&frame.labels[at(dx/radius,(dy+1)/radius)]===label?label:NONE;
+        if(now[i])any=true;
+      }
+      if(!any)return null;
+      [before,now]=[now,before];
+    }
+    return old;
   }
   function registeredCrease(frame,tracked,cx,w){
     const view={...frame,cap:{points:tracked,width:w}};
@@ -2127,13 +2445,451 @@
     if(offsets.some(q=>Math.hypot(dx-q.x,dy-q.y)>limit))return null;
     return {x:dx,y:dy};
   }
+  // Project the same circular mesh rings through a pinhole. The straight
+  // camera ray to the filling centre differs from the ray to the crown on
+  // close views. Radii, heights and the physical core all stay in millimetres.
+  let capRings;
+  function physicalCapRings(){
+    if(!capRings){
+      const mesh=modelAPI.mesh(geometry),rings=new Map();
+      for(const face of mesh.faces)if(face.part==='upper')for(const i of face.ids){
+        const [radius,y,z]=mesh.vertices[i];
+        if(z===0&&radius>=0)rings.set(radius+','+y,{radius,y});
+      }
+      capRings=[...rings.values()];
+    }
+    return capRings;
+  }
+  function cameraCrown(frame,angle,roll,focal,axes,box){
+    const width=box.right-box.left,mx=(box.left+box.right)/2,my=(box.top+box.bottom)/2;
+    const ppX=frame.w/2,ppY=frame.h/2;
+    let x=mx,y=my,z=focal*geometry.upperDiameter/width,project,core;
+    for(let step=0;step<5;step++){
+      const tx=(x-ppX)/focal,ty=(y-ppY)/focal,inv=1/Math.hypot(tx,ty,1);
+      const rx=tx*inv,ry=ty*inv,rz=inv,h=Math.hypot(rx,rz);
+      const sa=Math.sin(angle*DEG),ca=Math.cos(angle*DEG),sr=Math.sin(roll*DEG),cr=Math.cos(roll*DEG);
+      const ux=-sa*rx-ca*(rz*sr-rx*ry*cr)/h;
+      const uy=-sa*ry-ca*h*cr,uz=-sa*rz+ca*(rx*sr+rz*ry*cr)/h;
+      const coreY=globalThis.BurgerAttackRegion.CORE[1],coreDepth=z+coreY*uz;
+      core={x:ppX+focal*(tx*z+coreY*ux)/coreDepth,y:ppY+focal*(ty*z+coreY*uy)/coreDepth};
+      const rings=physicalCapRings().map(q=>({X:tx*z+q.y*ux,Y:ty*z+q.y*uy,Z:z+q.y*uz,r2:q.radius*q.radius}));
+      // The tangent plane for each image direction touches one physical ring.
+      project=(nx,ny)=>{
+        const a=nx*ux+ny*uy;let maximum=-Infinity;
+        for(const ring of rings){
+          const {X,Y,Z,r2}=ring,h=(nx*X+ny*Y)/Z,b=a-h*uz;
+          const den=Z*Z-r2*(1-uz*uz),v=r2*(h+b*uz);
+          const extent=h+(v+Math.sqrt(Math.max(0,v*v+den*r2*(1+h*h-b*b))))/den;
+          maximum=Math.max(maximum,extent);
+        }
+        return nx*ppX+ny*ppY+focal*maximum;
+      };
+      if(step===4)break;
+      const right=project(1,0),left=-project(-1,0),bottom=project(0,1),top=-project(0,-1);
+      x+=mx-(left+right)/2;y+=my-(top+bottom)/2;z*=(right-left)/width;
+    }
+    return {outline:axes.map(n=>project(n.x,n.y)),core,origin:{x,y},scale:focal/z};
+  }
+  const cameraAxes=Array.from({length:24},(_,i)=>({x:Math.cos(i*Math.PI/12),y:Math.sin(i*Math.PI/12)}));
+  function observedFrontAt(frame,cx,width){
+    const points=frame.cap.points,ys=[];
+    const aperture=Math.max(1,Math.round(width*.01));
+    for(let i=-4;i<=4;i++){
+      const x=Math.round(cx+i*width*.012);
+      let low=-Infinity;
+      for(let j=0;j<points.length;j++){
+        const a=points[j],b=points[(j+1)%points.length];
+        if((a.x<=x)!==(b.x<=x))low=Math.max(low,a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x));
+      }
+      let drop=18,edge=null;
+      for(let y=Math.ceil(low-width*.025);y<=low+width*.025;y++){
+        if(x<0||x>=frame.w||y<aperture||y>=frame.h-aperture)continue;
+        const k=y*frame.w+x,above=k-aperture*frame.w,below=k+aperture*frame.w;
+        const contrast=frame.gray[above]-frame.gray[below];
+        if(contrast>drop&&frame.labels[above]===BUN){drop=contrast;edge=y;}
+      }
+      if(edge!==null)ys.push(edge);
+    }
+    if(ys.length<7)return null;
+    ys.sort((a,b)=>a-b);
+    if(ys[ys.length-2]-ys[1]>Math.max(2,width*.018))return null;
+    return ys[ys.length-2]+aperture;
+  }
+  function perspectiveOcclusion(frame,pose,chosen,edgeError,api){
+    const box=bounds(frame.cap.points),w=box.right-box.left;
+    let boundary=Math.ceil(chosen);
+    while(boundary<90&&api.atElevation(boundary).status!=='blocked')boundary++;
+    const measured=cameraAxes.map(n=>Math.max(...frame.cap.points.map(q=>q.x*n.x+q.y*n.y)));
+    const tolerance=Math.max(.75,Math.min(w*.012,edgeError*w));
+    const parallel=cameraCrown(frame,boundary,pose.roll,Math.max(frame.w,frame.h)*10000,[],box);
+    for(const focal of [.58,.82,1.08].map(k=>k*Math.max(frame.w,frame.h))){
+      const error=angle=>{
+        const projected=cameraCrown(frame,angle,pose.roll,focal,cameraAxes,box).outline;
+        return projected.reduce((sum,val,i)=>sum+Math.abs(val-measured[i]),0)/measured.length;
+      };
+      const limit=cameraCrown(frame,boundary,pose.roll,focal,cameraAxes,box),core=limit.core;
+      // Subpixel lens displacement supplies no independent evidence against
+      // the original material-and-contour fit for a distant burger.
+      if(Math.hypot(core.x-parallel.core.x,core.y-parallel.core.y)<1)continue;
+      const front=observedFrontAt(frame,core.x,w);
+      if(front!==null&&core.y>front+1)continue;
+      const blocked=limit.outline.reduce((sum,val,i)=>sum+Math.abs(val-measured[i]),0)/measured.length;
+      // A distant upper contour cannot be rescued by an equally bad shallow fit.
+      if(blocked>w*.031)continue;
+      let open=Infinity;
+      for(let e=Math.max(0,chosen-4);e<boundary;e+=2)open=Math.min(open,error(e));
+      if(blocked<=open+tolerance)return true;
+    }
+    return false;
+  }
+
+
+  function upperCreaseEdge(frame,points,width){
+    const d=Math.max(2,Math.round(width*.025)),gray=frame.gray,edges=[];
+    for(const p of points){
+      // The darkest pixel belongs to the shadow below the upper bun.
+      // Locate the downward transition at its half-contrast crossing.
+      const k=p.y*frame.w+p.x;
+      if(p.y<2*d||p.y>=frame.h)continue;
+      let peak=gray[k];
+      for(let dy=1;dy<=2*d;dy++)peak=Math.max(peak,gray[k-dy*frame.w]);
+      if(peak-gray[k]<12)continue;
+      const half=(peak+gray[k])*.5;
+      for(let dy=0;dy<2*d;dy++){
+        const j=k-dy*frame.w,below=gray[j],above=gray[j-frame.w];
+        if(above>=half&&below<half){
+          edges.push({x:p.x,y:p.y-dy-1+(above-half)/(above-below)});break;
+        }
+      }
+    }
+    return edges;
+  }
+
+
+  let frontEnvelope;
+  function frontAtColumns(poly,samples){
+    const out=new Float64Array(samples.length).fill(-Infinity);
+    for(let i=0;i<poly.length;i++){
+      const a=poly[i],b=poly[(i+1)%poly.length];
+      const left=Math.min(a.x,b.x),right=Math.max(a.x,b.x);
+      if(left===right)continue;
+      // Seam columns are ordered. Each intersects only two polygon edges.
+      let lo=0,hi=samples.length;
+      while(lo<hi){
+        const mid=(lo+hi)>>1;
+        if(samples[mid].x<left)lo=mid+1;else hi=mid;
+      }
+      for(let j=lo;j<samples.length&&samples[j].x<right;j++){
+        const y=a.y+(samples[j].x-a.x)*(b.y-a.y)/(b.x-a.x);
+        out[j]=Math.max(out[j],y);
+      }
+    }
+    return out;
+  }
+  function projectBodyHeight(frame,box,roll,angle,focal,points){
+    if(!frontEnvelope){
+      const mesh=modelAPI.mesh(geometry),ids=new Set(mesh.faces.filter(q=>q.part==='filling').flatMap(q=>q.ids));
+      const ring=mesh.rings.find(q=>q.part==='upper');
+      const rim=Array.from({length:64},(_,j)=>{const a=j*Math.PI/32;return [ring.radius*Math.cos(a),ring.y,ring.radius*Math.sin(a)];});
+      frontEnvelope={body:[...ids].map(i=>mesh.vertices[i]),rim};
+    }
+    const camera=cameraCrown(frame,angle,roll,focal,[],box);
+    const project=globalThis.BurgerAttackRegion.projector({x:camera.origin.x,y:camera.origin.y,scale:camera.scale,
+      elevation:angle,roll,focal,principalX:frame.w/2,principalY:frame.h/2});
+    const body=hull(frontEnvelope.body.map(project)),rim=frontEnvelope.rim.map(project);
+    const bottom=frontAtColumns(body,points),front=frontAtColumns(rim,points);
+    return points.map((p,i)=>p.low-p.y-(bottom[i]-front[i]));
+  }
+
+  let firstCoveredElevation;
+  function fillingExcludesCoveredPose(input,frame,obs,box,roll,edges,edgeError){
+    const component=fillingAxis(input,obs)?.green,lower=component&&interiorGreenRows.get(component);
+    if(!lower)return false;
+    const w=obs.box.width,cx=obs.box.x+w/2;
+    const sample=edges.filter(p=>Math.abs(p.x-cx)<w*.36&&lower[p.x-component.left]>p.y)
+      .map(p=>({...p,low:lower[p.x-component.left]}));
+    if(sample.length<12||sample.at(-1).x-sample[0].x<w*.48)return false;
+    if(firstCoveredElevation===undefined){
+      firstCoveredElevation=0;
+      while(firstCoveredElevation<90&&globalThis.BurgerAttackRegion.atElevation(firstCoveredElevation).status!=='blocked')
+        firstCoveredElevation++;
+    }
+    // Check the last whole degree on the exposed side, with several focal
+    // lengths. A visible interior patch must fit inside the physical filling.
+    // Occluded or missing leaves provide no support for a shallower angle.
+    const gaps=sample.map(()=>Infinity),angle=firstCoveredElevation-1;
+    const margin=Math.max(2,1+w*edgeError);
+    for(const ratio of [1.08,.82,.58]){
+      const gap=projectBodyHeight(frame,box,roll,angle,Math.max(frame.w,frame.h)*ratio,sample);
+      for(let i=0;i<gaps.length;i++)gaps[i]=Math.min(gaps[i],gap[i]);
+      let start=null,previous=null,span=0;
+      for(let i=0;i<sample.length;i++){
+        const x=sample[i].x;
+        if(!(gaps[i]>margin)){start=null;continue;}
+        if(start===null||x-previous>.055*w)start=x;
+        span=Math.max(span,x-start);previous=x;
+      }
+      if(span<.10*w)return false;
+    }
+    return true;
+  }
+
+  let frontRingModel;
+  function fitCurrentFront(input,frame,seed,baseAngle,edgeError,requireFilling=false){
+    const box=bounds(frame.cap.points),width=box.right-box.left;
+    const obs={box:{x:box.left,y:box.top,width,height:box.bottom-box.top},contour:frame.cap.points};
+    const crease=coherentFrontBand(creaseColumns(input,obs),obs.box);
+    if(!crease||crease.length<22||crease.at(-1).x-crease[0].x<width*.68)return null;
+    const edges=upperCreaseEdge(frame,crease,width);
+    const measured=edges.length>=22&&edges.at(-1).x-edges[0].x>=width*.68&&
+      fillingExcludesCoveredPose(input,frame,obs,box,seed.roll,edges,edgeError);
+    if(requireFilling&&!measured)return null;
+    const band=measured?edges:crease;
+    const focal=.82*Math.max(frame.w,frame.h),tol=Math.max(1,edgeError*width);
+    if(!frontRingModel){
+      const ring=modelAPI.mesh(geometry).rings.find(q=>q.part==='upper');
+      frontRingModel=Array.from({length:48},(_,i)=>{const a=i*Math.PI/24;
+        return [ring.radius*Math.cos(a),ring.y,ring.radius*Math.sin(a)];});
+    }
+    const observed=cameraAxes.map(n=>Math.max(...frame.cap.points.map(q=>q.x*n.x+q.y*n.y)));
+    const trials=[];
+    for(let e=Math.max(0,Math.round(baseAngle)-6);e<=Math.min(90,baseAngle+18);e++){
+      const cam=cameraCrown(frame,e,seed.roll,focal,cameraAxes,box);
+      const outline=cam.outline.reduce((s,x,i)=>s+Math.abs(x-observed[i]),0)/observed.length;
+      if(outline>Math.max(1,width*.03))continue;
+      const project=globalThis.BurgerAttackRegion.projector({x:cam.origin.x,y:cam.origin.y,scale:cam.scale,
+        focal,principalX:frame.w/2,principalY:frame.h/2,elevation:e,roll:seed.roll});
+      const frontY=frontAtColumns(frontRingModel.map(project),band),errors=[];
+      for(let i=0;i<band.length;i++){
+        if(Number.isFinite(frontY[i]))errors.push(Math.abs(frontY[i]-band[i].y));
+      }
+      if(errors.length<band.length*.9)continue;
+      errors.sort((a,b)=>a-b);
+      const front=errors[Math.floor(errors.length*.60)];
+      trials.push({cam,e,front,outline,score:front+outline});
+    }
+    if(trials.length<3)return null;
+    const best=trials.reduce((p,q)=>p.score<q.score?p:q);
+    if(best.front>Math.max(1.6,.015*width)||best.outline>width*.02)return null;
+    // The extra observation must actually discriminate between the old
+    // elevation and the new one, in current source pixels.
+    const old=trials.find(q=>q.e===Math.round(baseAngle));
+    if(!old||old.front-best.front<2*tol)return null;
+    const supported=trials.filter(q=>q.front<=best.front+2*tol&&q.outline<=best.outline+tol);
+    const {cam,e}=best;
+    return {width,error:best.outline,pose:{center:{x:cam.origin.x/frame.w,y:cam.origin.y/frame.h},
+      scalePerSourceWidth:cam.scale/frame.w,elevationDegrees:e,rollDegrees:seed.roll,focalPerSourceWidth:focal/frame.w},
+      range:[Math.min(...supported.map(q=>q.e)),Math.max(...supported.map(q=>q.e))]};
+  }
+
+
+  function fitCameraPose(frame,seed,referenceAngle,edgeError,previous,measureFront){
+    const box=bounds(frame.cap.points),width=box.right-box.left,longest=Math.max(frame.w,frame.h);
+    const focal=longest*.82;
+    // The leading perspective displacement of a feature half-way across a
+    // circular section is proportional to its squared image diameter over f.
+    // An unresolved image sample cannot calibrate that displacement.
+    const parallax=width*width/(8*focal),localization=1+edgeError*width;
+    // An edge and its registration each carry localization error. A camera
+    // fit must resolve both before adding a new finite-distance measurement.
+    const continued=previous&&Math.abs(Math.log(width/previous.width))<.15;
+    // Even a measured interface cannot resolve finite-camera depth if its
+    // predicted displacement is within one registered edge sample.
+    if(parallax<localization)return null;
+    if(parallax<2*localization){
+      // An unresolved view cannot replace an independently measured current
+      // crease with a contour-only fit just because the last frame had a lens.
+      const front=measureFront?.();
+      if(front)return front;
+      if(!continued)return null;
+    }
+    const observed=cameraAxes.map(n=>Math.max(...frame.cap.points.map(q=>q.x*n.x+q.y*n.y)));
+    const samples=new Map();
+    const score=e=>{
+      if(samples.has(e))return samples.get(e);
+      const camera=cameraCrown(frame,e,seed.roll,focal,cameraAxes,box);
+      const error=camera.outline.reduce((sum,val,i)=>sum+Math.abs(val-observed[i]),0)/observed.length;
+      const q={camera,e,error};samples.set(e,q);return q;
+    };
+    const lo=Math.max(0,Math.floor(referenceAngle-8)),hi=Math.min(90,Math.ceil(referenceAngle+18));
+    let best=score(Math.round(referenceAngle));
+    for(let e=lo;e<=hi;e+=2){const q=score(e);if(q.error<best.error)best=q;}
+    const middle=best.e;
+    for(const e of [middle-1,middle+1])if(e>=lo&&e<=hi){const q=score(e);if(q.error<best.error)best=q;}
+    if(best.error>Math.max(1,width*.032))return null;
+    const {camera,e}=best;
+    const candidates=[...samples.values()].filter(q=>q.error<=best.error+Math.max(.4,Math.min(1.5,edgeError*width*.5)));
+    const angles=candidates.map(q=>q.e);
+    return {width,pose:{center:{x:camera.origin.x/frame.w,y:camera.origin.y/frame.h},scalePerSourceWidth:camera.scale/frame.w,
+      elevationDegrees:e,rollDegrees:seed.roll,focalPerSourceWidth:focal/frame.w},
+      range:[Math.min(...angles),Math.max(...angles)],error:best.error};
+  }
+
+
+  function fillingAxis(input,observation){
+    const frame=frameData(input),b=observation.box,w=b.width;
+    const clusters=components(frame,GREEN,5).filter(q=>{
+      const width=q.right-q.left+1,mid=(q.left+q.right)/2;
+      return width>.42*w&&width<1.24*w&&Math.abs(mid-b.x-w/2)<.36*w&&
+        q.y>b.y+b.height*.85&&q.y<b.y+b.height+w*.66&&q.count>width*2;
+    }).sort((a,b)=>b.count-a.count);
+    const q=clusters[0];if(!q)return null;
+    return {x:(q.left+q.right)/2,green:q};
+  }
+  function creaseColumns(input,observation){
+    const b=observation.box,w=b.width,frame=frameData(input),points=[];
+    const d=Math.max(2,Math.round(w*.025)),rgb=input.data;
+    const hue=k=>rgb[4*k+1]/Math.max(1,rgb[4*k]);
+    for(let j=1;j<37;j++){
+      const x=Math.round(b.x+w*j/38);if(x<1||x>=frame.w-1)continue;
+      let low=-Infinity;
+      for(let i=0;i<observation.contour.length;i++){
+        const u=observation.contour[i],v=observation.contour[(i+1)%observation.contour.length];
+        if((u.x<=x)!==(v.x<=x))low=Math.max(low,u.y+(v.y-u.y)*(x-u.x)/(v.x-u.x));
+      }
+      let best=0,edgeY=null;
+      for(let y=Math.max(2*d,Math.ceil(low-w*.12));y<Math.min(frame.h-2*d,low+w*.105);y++){
+        const k=y*frame.w+x,a=k-d*frame.w,dd=k+Math.round(1.5*d)*frame.w;
+        const l=frame.gray[k],top=frame.gray[a],bottom=frame.gray[dd];
+        // A bun-to-cheese crease is darker than both nearby layers, and
+        // the cheese below is yellower than the crown above the crease.
+        const contrast=Math.min(top-l,bottom-l);
+        if(contrast<8||hue(dd)<hue(a)+.045||rgb[4*a]<=rgb[4*a+1]*1.25)continue;
+        const score=contrast-.17*Math.abs(y-low);
+        if(score>best){best=score;edgeY=y;}
+      }
+      if(edgeY!==null)points.push({x,y:edgeY,score:best});
+    }
+    return points;
+  }
+  function interiorFlank(input,b,sign){
+    const w=b.width,h=b.height,side=sign>0?b.x:b.x+w,d=Math.max(2,Math.round(w*.033));
+    const rgb=input.data,points=[];
+    const hue=(x,y)=>{
+      if(x<0||x>=input.width||y<0||y>=input.height)return NaN;
+      const i=4*(y*input.width+x),r=rgb[i],g=rgb[i+1],blue=rgb[i+2];
+      return r-blue>30?(g-blue)/(r-blue):NaN;
+    };
+    for(let j=0;j<17;j++){
+      const y=Math.round(b.y+h*(.21+.49*j/16));let best=null;
+      for(let t=Math.ceil(.10*w);t<=.42*w;t++){
+        const x=Math.round(side+sign*t),outer=hue(x-sign*d,y),inner=hue(x+sign*d,y);
+        const score=Math.min(outer,hue(x-sign*2*d,y))-Math.max(inner,hue(x+sign*2*d,y));
+        if(score>=.075&&(!best||score>best.score)){
+          // Localise the onset of the change measured between these two
+          // plateaus. The broad shading inside a bun has no such outer plateau.
+          const limit=outer-(outer-inner)*.22;
+          let off=-d;
+          while(off<d&&hue(x+off*sign,y)>limit)off++;
+          best={x:x+off*sign,y,score};
+        }
+      }
+      if(best)points.push(best);
+    }
+    if(points.length<11)return null;
+    const xs=points.map(p=>p.x).sort((a,b)=>a-b);
+    if(xs[Math.floor(xs.length*.85)]-xs[Math.floor(xs.length*.15)]>w*.072)return null;
+    return points;
+  }
+  function coherentFrontBand(points,b){
+    if(points.length<10)return null;
+    const w=b.width,c=b.x+w/2,step=Math.max(1,Math.floor(points.length/14));
+    let best=null;
+    // The front interface of a round crown is smooth and convex towards
+    // the bottom of the image. Fit its visible portion to distinguish it
+    // from a second, lower cheese or tray edge in the same scan columns.
+    for(let i=0;i<points.length-2;i+=step)for(let j=i+1;j<points.length-1;j+=step){
+      const p=points[i],q=points[j];if(q.x-p.x<w*.15)continue;
+      for(let k=j+1;k<points.length;k+=step){
+        const r=points[k];if(r.x-q.x<w*.15||r.x-p.x<w*.43)continue;
+        const a=((r.y-q.y)/(r.x-q.x)-(q.y-p.y)/(q.x-p.x))/(r.x-p.x);
+        if(a*w>.025||a*w< -1.9)continue;
+        const slope=(q.y-p.y)/(q.x-p.x)-a*(q.x-p.x);
+        const inliers=points.filter(t=>Math.abs(t.y-p.y-(t.x-p.x)*(slope+a*(t.x-p.x)))<=Math.max(1.3,.014*w));
+        if(inliers.length<9)continue;
+        const span=(inliers.at(-1).x-inliers[0].x)/w;
+        if(span<.43)continue;
+        const evidence=inliers.reduce((s,t)=>s+Math.min(1,t.score/18),0)+5*span;
+        if(!best||evidence>best.evidence)best={points:inliers,evidence};
+      }
+    }
+    return best?.points??null;
+  }
+
+
+  function assessLayeredShoulder(input,observation){
+    if(!observation?.contour?.length||!['colour-cap','tracked-colour-cap'].includes(observation.method))return observation;
+    const b=observation.box,w=b.width,cx=b.x+w/2;
+    if(b.height>w*.84)return observation;
+    const body=fillingAxis(input,observation);
+    if(!body||Math.abs(body.x-cx)<w*.063)return observation;
+    const seam=coherentFrontBand(creaseColumns(input,observation),b);
+    if(!seam)return observation;
+    const sx=(seam[Math.floor(seam.length*.1)].x+seam[Math.floor(seam.length*.9)].x)/2;
+    const dx=sx-cx,bd=body.x-cx;
+    if(dx*bd<=0||Math.min(Math.abs(dx),Math.abs(bd))<w*.054||
+       Math.max(Math.abs(dx),Math.abs(bd))<w*.09)return observation;
+    const sign=Math.sign(dx),edge=interiorFlank(input,b,sign);
+    if(!edge)return observation;
+    const sorted=edge.map(q=>q.x).sort((a,b)=>a-b);
+    const shoulder=sorted[Math.floor(sorted.length*(sign>0?.25:.75))];
+    const far=sign>0?b.x+w:b.x,mid=(shoulder+far)/2,width=Math.abs(far-shoulder);
+    if(Math.abs(mid-sx)>w*.086||Math.abs(mid-body.x)>w*.10)return observation;
+    function traceAt(flank,angle){
+      const center=(flank+far)/2,span=Math.abs(flank-far);
+      const shape=fineTemplate(angle).upperHull,shapeBox=bounds(shape);
+      const guide=shape.map(p=>({x:center+span*((p.x-shapeBox.left)/(shapeBox.right-shapeBox.left)-.5),
+        y:b.y+b.height*(p.y-shapeBox.top)/(shapeBox.bottom-shapeBox.top)}));
+      const seed={...observation,box:{x:center-span/2,y:b.y,width:span,height:b.height},contour:guide};
+      const trial=traceCrown(input,seed,guide);
+      if(!trial||trial.refinement.supportedFraction<.80)return null;
+      const t=trial.box,near=sign>0?t.x:t.x+t.width,other=sign>0?t.x+t.width:t.x;
+      if(Math.abs(near-shoulder)>=w*.047||Math.abs(other-far)>=w*.05||!confirmCap(input,t).supported)return null;
+      return {...trial,method:'remeasured-layered-shoulder'};
+    }
+    const direct=traceAt(shoulder,25);
+    if(direct)return direct;
+    // The old wing encloses a second foreground-to-background transition.
+    // Use only current seam, side and opposite perimeter points for a new
+    // upper arc. If that arc cannot be measured, the conflicting box is unresolved.
+    const outside=edge.filter(q=>Math.abs(q.x-shoulder)<w*.05);
+    const crease=seam.filter(q=>Math.abs(q.x-mid)<width*.42&&Math.abs(q.y-b.y-b.height)<w*.10);
+    if(crease.length>=9){
+      const retained=observation.contour.filter(p=>sign*(p.x-mid)>=width*.05);
+      const rim=reflectedRim(input,{...observation,contour:hull([...outside,...crease,...retained])});
+      if(rim&&confirmCap(input,rim.box).supported)return {...rim,method:'remeasured-layered-shoulder'};
+    }
+    // The measured transition has a finite width. A single ray origin
+    // can miss the physical edge between two of its discrete radial bins.
+    // Bracket it with freshly measured flank samples and a shallow cap guide.
+    const median=sorted[Math.floor(sorted.length*.5)];
+    return (median!==shoulder?traceAt(median,25):null)??traceAt(shoulder,12);
+
+  }
+
+
   class Tracker {
     constructor({mode='handheld'}={}){templates??=buildTemplates();this.mode=mode;this.reset();}
-    reset(){this.gameGuard=null;this.last=null;this.lock=null;this.previous=null;this.lastTime=-Infinity;this.selection=null;this.streak=0;this.stableSince=null;this.frameAttitude=null;}
+    reset(){this.frontMeasurement=null;this.gameGuard=null;this.last=null;this.lock=null;this.previous=null;this.lastTime=-Infinity;this.selection=null;this.streak=0;this.stableSince=null;this.frameAttitude=null;}
     // Keep the game's last confirmed measurement separate from tentative solver fits.
     confirmGameFit(timestampMs){
       if(this.last?.time===timestampMs)
         this.gameGuard={raw:this.last.raw,time:timestampMs,frame:{cap:this.last.frame.cap,coreSurface:this.last.frame.coreSurface}};
+    }
+    registeredFront(input,frame,best,time,requireFilling=false){
+      const q=fitCurrentFront(input,frame,best,templateOf(best).elevation,best.e.contourError,requireFilling);
+      if(!q){this.frontMeasurement=null;return null;}
+      // The fixed mesh has two distinguishable outlines here. Verify the
+      // same rim solution in successive independently traced current frames.
+      const p=q.pose,c={x:p.center.x*frame.w,y:p.center.y*frame.h},old=this.frontMeasurement;
+      if(!old||old.last!==this.last?.time||time-old.last>250||
+          Math.hypot(c.x-old.x,c.y-old.y)>.035*q.width||Math.abs(Math.log(old.width/q.width))>.05||
+          Math.abs(old.angle-p.elevationDegrees)>2){
+        this.frontMeasurement={...c,width:q.width,angle:p.elevationDegrees,first:time,last:time,count:1};
+        return null;
+      }
+      old.last=time;old.count++;
+      return old.count>=3&&time-old.first>=180?q:null;
     }
     select(x,y){this.reset();this.selection={x,y};}
     missing(timestampMs,reason='short-gap-display-only',{frame}={}) {
@@ -2169,7 +2925,7 @@
         null,input.width,input.height,timestampMs))};
       return out;
     }
-    fit(input,timestampMs,{temporal=true,registeredToPending=false,recheckOcclusion=false,tableAttitude=null,capObservation:observedCap=undefined,contourRecovery=false,imageRoll=null,panSteps=[]}={}) {
+    fit(input,timestampMs,{temporal=true,registeredToPending=false,recheckOcclusion=false,recentReflection=false,tableAttitude=null,capObservation:observedCap=undefined,contourRecovery=false,imageRoll=null,panSteps=[]}={}) {
       if(!Number.isFinite(timestampMs)||input.data.length!==input.width*input.height*4)throw new TypeError('RGBA frame and monotonic timestamp required');
       if(!temporal||timestampMs<=this.lastTime||timestampMs-this.lastTime>HOLD_MS||this.previous&&
         (this.previous.w!==input.width||this.previous.h!==input.height)) {
@@ -2383,9 +3139,24 @@
       const raw={x:best.x,y:best.y,scale:best.scale,roll:best.roll,t:best.t,template:best.template,topSeed:best.topSeed};
       const toPose=p=>({center:{x:p.x/frame.w,y:p.y/frame.h},scalePerSourceWidth:p.scale/frame.w,
         elevationDegrees:templateOf(p).elevation,rollDegrees:p.roll});
-      const pose=toPose(raw),display={...pose,center:{...pose.center}};
+      const closeMarked=observedCap?.method==='large-marked-crown';
+      const reflected=closeMarked||observedCap?.method==='reflected-rim';
+      const priorCamera=this.last&&timestampMs-this.last.time<=250?this.last.camera:null;
+      // Ordinary detections keep their validated material/contour fit. Once
+      // a recovered specular rim has actually resolved finite-camera spacing,
+      // use that camera model on a continuous track of the same physical cap.
+      const trackedCamera=frame.table&&!frame.attitude?.used&&(reflected||recentReflection||priorCamera&&continuous)?
+        fitCameraPose(frame,best,templateOf(best).elevation,best.e.contourError,priorCamera,reflected&&!closeMarked?()=>this.registeredFront(input,frame,best,timestampMs):null):null;
+      // The raw seam and the visible filling can constrain a stationary crown
+      // without a previous split colour mask. Retain the regular tracker
+      // geometry unless this independent current-frame comparison succeeds.
+      const plainGlint=!trackedCamera&&frame.table&&!frame.attitude?.used&&observedCap?.method==='colour-cap'&&
+        observedCap.box.width**2/(8*.82*Math.max(frame.w,frame.h))>1+best.e.contourError*observedCap.box.width&&
+        containsReflection(input,observedCap);
+      const camera=trackedCamera||(plainGlint?this.registeredFront(input,frame,best,timestampMs,true):null);
+      const pose=camera?.pose??toPose(raw),display={...pose,center:{...pose.center}};
       // Smooth only the display position/scale, never permission or evidence.
-      if(continuous&&temporal) {
+      if(continuous&&temporal&&!!this.last.display.focalPerSourceWidth===!!pose.focalPerSourceWidth) {
         const old=this.last.display,a=1-Math.exp(-dtMs/78);
         display.center={x:old.center.x+(pose.center.x-old.center.x)*a,y:old.center.y+(pose.center.y-old.center.y)*a};
         display.scalePerSourceWidth=old.scalePerSourceWidth+(pose.scalePerSourceWidth-old.scalePerSourceWidth)*a;
@@ -2396,7 +3167,7 @@
           display.elevationDegrees=old.elevationDegrees+(pose.elevationDegrees-old.elevationDegrees)*(1-Math.exp(-dtMs/167));
         }
       }
-      this.last={raw,display,time:timestampMs,frame};this.previous=frame;this.selection=null;
+      this.last={raw,display,time:timestampMs,frame,camera:trackedCamera?{width:trackedCamera.width}:null};this.previous=frame;this.selection=null;
       if(temporal&&steady&&(this.lock||this.streak>=3&&timestampMs-this.stableSince>=120))this.lock=this.last;
       // A display neighbourhood only, NOT a calibrated confidence interval or
       // a hittable filling mask. poseStatus carries unresolved fit ambiguity.
@@ -2420,27 +3191,44 @@
       // Test the nearest blocked orientation in the same five-degree fine
       // search range against current pixels before granting a shot.
       const regionAPI=globalThis.BurgerAttackRegion,chosen=templateOf(best).elevation;
-      if(recheckOcclusion&&visited&&!capOnly&&regionAPI?.atElevation&&
+      // The recovered specular edge can support two heights for the same
+      // projected core. Test the first physically blocked orientation against the
+      // current pixels, even when the preceding pose favoured a shallow view.
+      if((recheckOcclusion||reflected)&&visited&&!capOnly&&regionAPI?.atElevation&&
         plausibleFits.every(q=>regionAPI.atElevation(templateOf(q).elevation).status==='exposed')&&
-        regionAPI.atElevation(Math.min(90,chosen+5)).status==='blocked'){
+        (reflected||regionAPI.atElevation(Math.min(90,chosen+5)).status==='blocked')){
         let angle=Math.ceil(chosen);
         while(angle<90&&regionAPI.atElevation(angle).status!=='blocked')angle++;
         for(const roll of new Set([best.roll,best.roll-3,best.roll+3,0])){
           const q=alignCap(frame,{...best,roll,t:(angle+70)/10,template:fineTemplate(angle)});
           q.e=evaluate(frame,q);
           if(best.e.rankingScore-q.e.rankingScore<.045&&isSupported(q)&&
-            (!guard||continuity(q,guardPose,timestampMs-guard.time).allowed)){
+            (reflected||!guard||continuity(q,guardPose,timestampMs-guard.time).allowed)){
             plausibleFits.push(q);break;
           }
         }
       }
       const possibleAngles=frame.table?plausibleFits.map(p=>templateOf(p).elevation):[];
-      const angleRange=possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null;
-      const regionEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templateOf(p).elevation));
+      const angleRange=camera?.range??(possibleAngles.length?[Math.min(...possibleAngles),Math.max(...possibleAngles)]:null);
+      const registrationEvidence=regionAPI?.evaluate(plausibleFits.map(p=>templateOf(p).elevation));
       const core=regionAPI?regionAPI.coreCenter(pose,frame.w,frame.h):pose.center;
+      const physical=camera&&regionAPI.atCameraPose(pose,frame.w,frame.h);
+      const regionEvidence=physical?{status:physical.evidence.status,centerSurface:physical.evidence.centerSurface,
+        fillingFractionRange:[physical.evidence.fillingFraction,physical.evidence.fillingFraction]}:registrationEvidence;
       let attackability=placementUncertain||capOnly&&regionEvidence?.status==='exposed'?'unknown':regionEvidence?.status??'unknown';
+      if(camera){
+        const distance=pose.focalPerSourceWidth/pose.scalePerSourceWidth*
+          Math.hypot(1,(pose.center.x-.5)/pose.focalPerSourceWidth,(pose.center.y-.5)*frame.h/(frame.w*pose.focalPerSourceWidth));
+        const rayAtCore=e=>Math.atan2(distance*Math.sin(e*DEG)-regionAPI.CORE[1],distance*Math.cos(e*DEG))/DEG;
+        const range=regionAPI.evaluate([Math.max(-90,Math.floor(rayAtCore(camera.range[0]))),
+          Math.min(90,Math.ceil(rayAtCore(camera.range[1])))]);
+        if(range.status!==attackability||attackability==='exposed'&&registrationEvidence.status!=='exposed')attackability='unknown';
+      }
+      if(attackability==='exposed'&&(reflected||recentReflection)&&
+        perspectiveOcclusion(frame,best,chosen,best.e.contourError,regionAPI))attackability='unknown';
+      if(closeMarked&&attackability!=='blocked')attackability='unknown';
       if(frame.table&&attackability==='exposed'){
-        frame.coreSurface=coreSurface(input,frame,core,pose,regionAPI.RULE.radiusMm,timestampMs,this.gameGuard?.frame.coreSurface);
+        frame.coreSurface=coreSurface(input,frame,core,physical?{...pose,scalePerSourceWidth:physical.scale/frame.w}:pose,regionAPI.RULE.radiusMm,timestampMs,this.gameGuard?.frame.coreSurface);
         if(!frame.coreSurface)attackability='unknown';
       }
       return {...empty(timestampMs),evidenceTimestampMs:timestampMs,tracking:'found',targetFound:true,
@@ -2450,14 +3238,15 @@
         // Only current measurements get a region. A frozen display marker is
         // not a fresh target and missing() clears this preview immediately.
         attackRegion:regionAPI?{center:{...core},radiusMm:regionAPI.RULE.radiusMm,
-          radiusX:best.scale*regionAPI.RULE.radiusMm/frame.w,radiusY:best.scale*regionAPI.RULE.radiusMm/frame.h}:null,
+          radiusX:(physical?.scale??best.scale)*regionAPI.RULE.radiusMm/frame.w,radiusY:(physical?.scale??best.scale)*regionAPI.RULE.radiusMm/frame.h}:null,
         modelAttackability:attackability,
         modelFillingFractionRange:regionEvidence?.fillingFractionRange??null,
         bunContour:contour,measuredUpperRim:!!frame.cap?.measuredUpperRim,measuredDistant:!!frame.cap?.measuredDistant,elevationRangeDegrees:angleRange,
         viewClass:angleRange?(angleRange[0]>=30?'oblique-top':angleRange[1]<=10?'side':'unknown'):null,
         // Geometric self-occlusion only. Fingers are absent from the mesh.
         modelCenterSurface:regionEvidence?.centerSurface??'unknown',
-        debug:{fit:best.e,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
+        projection:camera?'pinhole':'orthographic-approximation',
+        debug:{fit:best.e,cameraErrorPx:camera?.error,competingScore:competing?.e.score??null,hypotheses:hypotheses.length,motionCorrelation:motion?.correlation??null,
           candidates:visuallySupported.map(p=>({elevationDegrees:templateOf(p).elevation,rollDegrees:p.roll,score:p.e.score,
             selectionScore:selectionMerit(p),continuous:supportedFits.includes(p),
             center:{x:p.x/frame.w,y:p.y/frame.h},scalePerSourceWidth:p.scale/frame.w})),
@@ -2484,6 +3273,7 @@
   }
   function detectCap(input,recoveryBox=null){
     const frame=frameData(input),cap=capObservation(input,frame,null,recoveryBox);
+    if(cap?.measuredRim)return cap.measuredRim;
     if(!cap&&!recoveryBox)return null;
     const b=cap?bounds(cap.points):null;
     const box=b?{x:b.left,y:b.top,width:b.right-b.left,height:b.bottom-b.top}:recoveryBox;
@@ -2504,7 +3294,19 @@
           return {...candidate,sesame,hasFilling:true,boundary:edge,method:'sesame-edge'};
       }
     }
-    return cap?traceCrown(input,observation)??observation:null;
+    if(!cap)return null;
+    const traced=traceCrown(input,observation)??observation;
+    if(cap.alternativeRim&&visibleReflectionBetween(input,traced,cap.alternativeRim))
+      return {...traced,alternativeRim:cap.alternativeRim};
+    return traced;
+  }
+  function correctReflection(input,traced){
+    if(traced.method==='colour-cap'&&traced.refinement?.supportedFraction>=.8&&
+      containsReflection(input,traced)){
+      const measured=reflectedRim(input,traced);
+      if(measured&&visibleReflectionBetween(input,traced,measured))return measured;
+    }
+    return traced;
   }
   // Confirmation only: requires a previously tracked cap box. It neither
   // initializes a target nor infers the hidden core/attackable state.
@@ -2533,7 +3335,7 @@
     return {supported:warm/capN>=.3&&green>=5&&dark>=15&&greenColumns.size>=2&&darkColumns.size>=3,
       warmFraction:warm/capN,greenFraction:green/240,darkFraction:dark/240};
   }
-  globalThis.BurgerPose={Tracker,empty,geometry,classify,prepareFrame,HOLD_MS,detectCap,motionBlurReference,interiorCrownPoints,registeredSesameOutline,refineCap,verifyChords,creaseRegistration,measuredFlanks,findCurrentOutline,seededLayerOutline,findLayeredOutline,seamSearch,shallowAttachment,confirmCap,hasFrontCrease,supportsContour,
+  globalThis.BurgerPose={Tracker,empty,assessLayeredShoulder,geometry,classify,prepareFrame,HOLD_MS,detectCap,correctReflection,motionBlurReference,interiorCrownPoints,registeredSesameOutline,refineCap,verifyChords,creaseRegistration,measuredFlanks,findCurrentOutline,seededLayerOutline,findLayeredOutline,seamSearch,shallowAttachment,confirmCap,hasFrontCrease,supportsContour,
     recoverCap:(input,box)=>box?detectCap(input,box):null,
     observeLayers:(input,contour)=>visibleLayers({...frameData(input),cap:contour?{points:contour}:null})};
 })();

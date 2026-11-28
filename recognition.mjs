@@ -1,6 +1,6 @@
 // Tabletop geometry is experimental; fingers and props are not modelled.
 export const MAX_EVIDENCE_AGE=250,DISPLAY_HOLD_MS=500;
-export const RUNTIME_RELEASE='v158';
+export const RUNTIME_RELEASE='v198';
 export function permission(result,age) {
   if(!result||age<0||age>MAX_EVIDENCE_AGE)return 'unknown';
   // Negative evidence does not require a precise target point. Positive hit
@@ -47,7 +47,7 @@ export function setupRecognition({getSource,onResult}) {
     if(records.length>3600)records.shift();
   }
   try {
-    worker=new Worker(new URL('./ar/game-worker.js?v=158',import.meta.url));
+    worker=new Worker(new URL('./ar/game-worker.js?v=198',import.meta.url));
     worker.onmessage=({data})=>{
       const job=pending;pending=null;
       if(!job||data.generation!==generation||job.generation!==generation||disposed)return;

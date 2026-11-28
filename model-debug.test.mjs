@@ -39,3 +39,15 @@ test('debug core cross and normalized gameplay core agree without shifting model
     assert.deepEqual(pose.center,{x:.5,y:.5});
   }
 });
+
+test('finite lens maps the whole mesh and core through both video layouts',()=>{
+  const p={center:{x:.68,y:.26},scalePerSourceWidth:.018,elevationDegrees:38,rollDegrees:-7,focalPerSourceWidth:1.31};
+  const api=globalThis.BurgerAttackRegion,src=api.projector(screenPose(p,640,1138,640,1138,'video'));
+  for(const type of ['camera','video'])for(const [w,h] of [[844,390],[385,710]]){
+    const dst=api.projector(screenPose(p,640,1138,w,h,type)),z=(type==='camera'?Math.max:Math.min)(w/640,h/1138);
+    for(const pt of [api.CORE,[-9,7,4],[6,12,-1],[4,-6,5]]){
+      const q=src(pt),v=dst(pt);
+      assert.ok(Math.hypot(v.x-(w/2+(q.x-320)*z),v.y-(h/2+(q.y-569)*z))<1e-6);
+    }
+  }
+});

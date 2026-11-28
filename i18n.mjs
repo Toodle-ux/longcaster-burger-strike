@@ -1,4 +1,4 @@
-import {messages} from './messages.mjs?v=158';
+import {messages} from './messages.mjs?v=198';
 const storageKey='burger-strike-language';
 export function preferredLanguage(languages=[]) {
   for(const value of languages) {

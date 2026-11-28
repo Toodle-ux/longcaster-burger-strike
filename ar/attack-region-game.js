@@ -11,21 +11,54 @@
   // Gameplay calibration in model millimetres (+Y is up), not screen pixels.
   // Keep fitting the unchanged mesh at its origin; all core consumers share this offset.
   const CORE=Object.freeze([0,-1,0]);
-  const projectCore=transform=>model.project(CORE,transform);
+  // A source transform can also be transported to the preview canvas. Focal
+  // length and principal point then follow the same cover/contain mapping.
+  function sourceTransform(pose,width,height){
+    return {x:pose.center.x*width,y:pose.center.y*height,scale:pose.scalePerSourceWidth*width,
+      elevation:pose.elevationDegrees,roll:pose.rollDegrees,...(pose.focalPerSourceWidth?
+        {focal:pose.focalPerSourceWidth*width,principalX:width/2,principalY:height/2}:{})};
+  }
+  function projector(t){
+    if(!t.focal)return point=>model.project(point,t);
+    const f=t.focal,tx=(t.x-t.principalX)/f,ty=(t.y-t.principalY)/f,z=f/t.scale;
+    const inv=1/Math.hypot(tx,ty,1),rx=tx*inv,ry=ty*inv,rz=inv,h=Math.hypot(rx,rz);
+    const a=t.elevation*Math.PI/180,b=t.roll*Math.PI/180;
+    const ca=Math.cos(a),sa=Math.sin(a),cr=Math.cos(b),sr=Math.sin(b);
+    return ([x,y,front])=>{
+      const vertical=y*ca-front*sa,u=x*cr-vertical*sr,v=-x*sr-vertical*cr,depth=y*sa+front*ca;
+      const X=tx*z+u*rz/h-v*rx*ry/h-depth*rx;
+      const Y=ty*z+v*h-depth*ry,Z=z-u*rx/h-v*ry*rz/h-depth*rz;
+      return {x:t.principalX+f*X/Z,y:t.principalY+f*Y/Z,z:1/Z};
+    };
+  }
+  const projectCore=transform=>projector(transform)(CORE);
   function coreCenter(pose,width,height){
-    const p=projectCore({x:pose.center.x*width,y:pose.center.y*height,
-      scale:pose.scalePerSourceWidth*width,elevation:pose.elevationDegrees,roll:pose.rollDegrees});
+    const p=projectCore(sourceTransform(pose,width,height));
     return {x:p.x/width,y:p.y/height};
   }
+  function atCameraPose(pose,width,height){
+    const transform=sourceTransform(pose,width,height),project=projector(transform),core=project(CORE);
+    // The radius-2 mm sample disk is in the image-parallel plane through
+    // the model's core. Reciprocal depth is linear across a projected triangle.
+    const scale=transform.focal*core.z;
+    const points=mesh.vertices.map(point=>{
+      const q=project(point);return {x:(q.x-core.x)/scale,y:(q.y-core.y)/scale,z:q.z};
+    });
+    return {evidence:sampleDisk(points,pose.elevationDegrees),scale};
+  }
+
   function atElevation(elevation) {
     if(!Number.isFinite(elevation)||elevation< -90||elevation>90)throw new RangeError('Elevation must be -90..90 degrees');
     // No quantisation here: callers can also inspect the rule between the
     // tracker's 10-degree pose templates. Normal tracking uses only 17 entries.
     if(cache.has(elevation))return cache.get(elevation);
-    const step=RULE.sampleStepMm,half=Math.ceil(RULE.radiusMm/step),n=half*2+1;
-    const depth=new Float64Array(n*n).fill(-Infinity),material=new Uint8Array(n*n);
     const transform={x:0,y:0,scale:1,elevation,roll:0},core=projectCore(transform);
     const vertices=mesh.vertices.map(p=>{const q=model.project(p,transform);return {...q,x:q.x-core.x,y:q.y-core.y};});
+    const result=sampleDisk(vertices,elevation);cache.set(elevation,result);return result;
+  }
+  function sampleDisk(vertices,elevation){
+    const step=RULE.sampleStepMm,half=Math.ceil(RULE.radiusMm/step),n=half*2+1;
+    const depth=new Float64Array(n*n).fill(-Infinity),material=new Uint8Array(n*n);
     for(const face of mesh.faces)for(const ids of [[0,1,2],[0,2,3]]) {
       const [a,b,c]=ids.map(i=>vertices[face.ids[i]]),den=(b.y-c.y)*(a.x-c.x)+(c.x-b.x)*(a.y-c.y);
       if(Math.abs(den)<1e-9)continue;
@@ -53,7 +86,7 @@
       center===2&&fillingFraction>=RULE.minFillingFraction?'exposed':'unknown';
     const result=Object.freeze({elevationDegrees:elevation,fillingFraction,bunFraction,status,
       centerSurface:center===2?'filling':center===1?'bun':'unknown',samples:Object.freeze(samples)});
-    cache.set(elevation,result);return result;
+    return result;
   }
   function evaluate(elevations) {
     if(!elevations.length)return {status:'unknown',fillingFractionRange:null,centerSurface:'unknown'};
@@ -62,5 +95,5 @@
       fillingFractionRange:[Math.min(...values.map(v=>v.fillingFraction)),Math.max(...values.map(v=>v.fillingFraction))],
       centerSurface:values.every(v=>v.centerSurface===first.centerSurface)?first.centerSurface:'unknown'};
   }
-  globalThis.BurgerAttackRegion={RULE,CORE,projectCore,coreCenter,atElevation,evaluate};
+  globalThis.BurgerAttackRegion={RULE,CORE,projector,projectCore,coreCenter,atElevation,atCameraPose,evaluate};
 })();

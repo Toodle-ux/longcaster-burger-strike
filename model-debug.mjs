@@ -1,6 +1,6 @@
-import './ar/coarse-model.js?v=158';
-import './ar/attack-region-game.js?v=158';
-import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=158';
+import './ar/coarse-model.js?v=198';
+import './ar/attack-region-game.js?v=198';
+import {sourcePoint,MAX_EVIDENCE_AGE} from './recognition.mjs?v=198';
 
 // Read-only view of the same model/pose used by the Worker. Never feeds back
 // into tracking or permission; the gameplay marker has separate UI smoothing.
@@ -19,7 +19,8 @@ export function screenPose(pose,sourceWidth,sourceHeight,width,height,type){
   const center=sourcePoint(pose.center,sourceWidth,sourceHeight,width,height,fit);
   const zoom=(fit==='cover'?Math.max:Math.min)(width/sourceWidth,height/sourceHeight);
   return {...center,scale:pose.scalePerSourceWidth*sourceWidth*zoom,
-    elevation:pose.elevationDegrees,roll:pose.rollDegrees};
+    elevation:pose.elevationDegrees,roll:pose.rollDegrees,...(pose.focalPerSourceWidth?
+      {focal:pose.focalPerSourceWidth*sourceWidth*zoom,principalX:width/2,principalY:height/2}:{})};
 }
 
 function hull(points){
@@ -59,7 +60,8 @@ export function createModelDebug({canvas,info,toggle,t}){
     };
     if(p){
       const transform=screenPose(p,video.videoWidth,video.videoHeight,width,height,view.type);
-      for(const part of parts)line(hull(part.vertices.map(v=>api.project(v,transform))),
+      const project=globalThis.BurgerAttackRegion.projector(transform);
+      for(const part of parts)line(hull(part.vertices.map(project)),
         snap.held?'#aeb8c3':{upper:'#57e4ff',filling:'#ef8cff',lower:'#ffe182'}[part.part],snap.held?[5,5]:[]);
       const {x,y}=globalThis.BurgerAttackRegion.projectCore(transform);ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(x-6,y);ctx.lineTo(x+6,y);ctx.moveTo(x,y-6);ctx.lineTo(x,y+6);
       ctx.strokeStyle=snap.held?'#aeb8c3':'#fff';ctx.lineWidth=2;ctx.stroke();

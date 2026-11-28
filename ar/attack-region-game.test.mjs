@@ -29,3 +29,15 @@ test('core moves one model millimetre down, including rotated and overhead views
   assert.equal(BurgerAttackRegion.atElevation(36).status,'exposed');
   assert.equal(BurgerAttackRegion.atElevation(40).status,'blocked');
 });
+
+test('pinhole core, finite depth and orthographic limit use the same physical mesh',()=>{
+  const a=globalThis.BurgerAttackRegion;
+  for(const e of [12,29,50,75]){
+    const pose={center:{x:.5,y:.5},elevationDegrees:e,rollDegrees:7,scalePerSourceWidth:5/640,focalPerSourceWidth:10000};
+    const result=a.atCameraPose(pose,640,1138),old=a.atElevation(e);
+    assert.equal(result.evidence.status,old.status);
+    assert.ok(Math.abs(result.evidence.fillingFraction-old.fillingFraction)<.025);
+    const center=a.coreCenter(pose,640,1138),parallel=a.coreCenter({...pose,focalPerSourceWidth:undefined},640,1138);
+    assert.ok(Math.hypot((center.x-parallel.x)*640,(center.y-parallel.y)*1138)<.01);
+  }
+});

@@ -57,17 +57,52 @@
       this.reset();
     }
     reset(){this.visual.reset();this.geometry.reset();this.anchor=null;this.pendingPose=null;
-      this.exposure=null;this.confirmedExposure=null;this.blockedAt=null;this.panSteps=[];this.imageContour=null;this.sideEdgeAt=-Infinity;this.retryAt=-Infinity;this.lostReference=null;this.lastTime=-Infinity;this.size='';this.firstOutline=null;}
-    observe(){if(this.detection===undefined)this.detection=this.detect(this.input);return this.detection;}
+      this.exposure=null;this.confirmedExposure=null;this.blockedAt=null;this.panSteps=[];this.imageContour=null;this.shoulderTrack=null;this.reflectionAt=-Infinity;this.sideEdgeAt=-Infinity;this.retryAt=-Infinity;this.lostReference=null;this.lastTime=-Infinity;this.size='';this.firstOutline=null;}
+    observe(){
+      if(this.detection!==undefined)return this.detection;
+      let observation=this.detect(this.input);
+      if(observation?.method==='reflected-rim')this.reflectionAt=this.lastTime;
+      else if(observation&&this.lastTime-this.reflectionAt<=250&&this.visual.box&&sameTarget(this.visual.box,observation.box)){
+        // Recheck the current RGB rim only while a split colour proposal was
+        // independently observed on this same track. This cannot keep a hit alive.
+        const split=observation.alternativeRim,previous=this.anchor?.capBox;
+        const recent=previous&&this.lastTime-this.anchor.time<=250;
+        // Compare the current alternatives in bun-local dimensions. A change
+        // in image position can be camera pan and does not indicate a new cap.
+        if(split&&recent&&sameTarget(this.visual.box,split.box)){
+          const sizeError=box=>Math.abs(Math.log(box.width/previous.width))+
+            Math.abs(box.height/box.width-previous.height/previous.width);
+          if(sizeError(split.box)+.025<sizeError(observation.box))observation=split;
+        }
+        if(observation.method!=='reflected-rim')
+          observation=globalThis.BurgerPose.correctReflection(this.input,observation);
+      }
+      if(globalThis.BurgerPose.assessLayeredShoulder)observation=globalThis.BurgerPose.assessLayeredShoulder(this.input,observation);
+      return this.detection=observation;
+    }
     update(input,timestampMs){
       input=globalThis.BurgerPose.prepareFrame?.(input)??input;
       const size=input.width+'x'+input.height;
       if(timestampMs<=this.lastTime||timestampMs-this.lastTime>300||this.size!==size)this.reset();
-      const fromTime=this.lastTime,previousBox=this.visual.box;
+      let fromTime=this.lastTime,previousBox=this.visual.box;
       this.lastTime=timestampMs;this.size=size;this.input=input;this.detection=undefined;
       // The game already needs the current detector contour for its model. Give
       // the same observation to texture verification, including on a fast pan.
-      const observed=this.observe(),pending=this.visual.pending;
+      const observed=this.observe();
+      if(previousBox&&observed?.method==='remeasured-layered-shoulder'&&!sameTarget(previousBox,observed.box)){
+        // The colour/texture verifier tolerates a wider search box than the
+        // geometry adapter. Do not keep verifying that obsolete wide box
+        // against a different current shoulder indefinitely.
+        const z=this.shoulderTrack;
+        if(!z||timestampMs-z.last>CONFIRM_GAP_MS||!sameTarget(z.box,observed.box))
+          this.shoulderTrack={box:observed.box,since:timestampMs,last:timestampMs,count:0};
+        const pending=this.shoulderTrack;pending.count++;pending.last=timestampMs;
+        if(pending.count>=CONFIRM_FRAMES&&timestampMs-pending.since>=CONFIRM_MS){
+          this.reset();this.lastTime=timestampMs;this.size=size;this.input=input;this.detection=observed;
+          fromTime=-Infinity;previousBox=null;
+        }
+      }else this.shoulderTrack=null;
+      const pending=this.visual.pending;
       // The second full detection can join a tray rail while its predecessor
       // still has the physical diameter. Check current scan-line endpoints
       // against independent feature motion before the usual acquisition vote.
@@ -142,7 +177,10 @@
       // Do not override a conflicting full detection or revive expired identity.
       const localSearch=!observation&&visual.inlierPoints>=7&&
         Number.isFinite(visual.lastDetectionAgeMs)&&visual.lastDetectionAgeMs<=3000;
-      if(localSearch)observation=this.recover(input,visual.targetBounds);
+      if(localSearch){
+        observation=this.recover(input,visual.targetBounds);
+        if(globalThis.BurgerPose.assessLayeredShoulder)observation=globalThis.BurgerPose.assessLayeredShoulder(input,observation);
+      }
       if(observation&&sameTarget(visual.targetBounds,observation.box))
         observation=globalThis.BurgerPose.refineCap(input,observation);
       if(observation?.refinement?.method==='closed-edge'&&this.anchor&&timestampMs-this.anchor.time<500&&
@@ -235,6 +273,7 @@
         // history. Independently check a competing occluded fit during the
         // same window used to confirm a reacquired core.
         recheckOcclusion:timestampMs-this.retryAt<=CONFIRM_WINDOW_MS||observation?.method==='registered-sesame-outline',
+        recentReflection:timestampMs-this.reflectionAt<=250&&matched,
         registeredToPending:visual.reason==='acquired'&&observed!==this.detection,
         imageRoll:visual.reason==='image-track-verified'&&visual.inlierPoints>=7&&Number.isFinite(visual.rotationChange)?
           {fromTime,degrees:visual.rotationChange}:null,
@@ -299,7 +338,7 @@
           // texture reference; otherwise continue its measured image motion.
           if(!paired&&observation.method!=='registered-sesame-outline'&&fit.debug?.fit?.registration!=='full-perimeter'&&(trackSource===observation||reseeded))
             this.imageContour=trackSource.sesame?.strong&&outline?.length>=8?outline:null;
-          this.anchor={local,displayPose:pose,parallaxReference,capMethod:observation.method,
+          this.anchor={local,displayPose:pose,parallaxReference,capMethod:observation.method,capBox:{...poseBox},
             motionBox:{...visual.targetBounds},time:timestampMs};
           this.pendingPose=null;
           // A missing frame revokes permission. A brief miss may retain identity,
